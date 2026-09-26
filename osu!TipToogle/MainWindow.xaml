@@ -59,8 +59,12 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="14,6,0,0">
-                    <TextBlock Foreground="#E4E4E7" FontSize="17" FontWeight="SemiBold"><Run Text="osu! "/><Run Text="Wacom Pen Tip"/><Run Text=" Auto-Toggle"/></TextBlock>
-                    <TextBlock Text="This tool needs shavit's firmware installed in order to work" Foreground="#71717A" FontSize="10" Margin="0,1,0,0"/>
+                    <TextBlock Foreground="#E4E4E7" FontSize="17" FontWeight="SemiBold">
+                        <Run Text="osu!"/>
+                        <Run Text="Wacom Pen Tip"/>
+                        <Run Text="Auto-Toggle"/>
+                    </TextBlock>
+                    <TextBlock Text="Requires shavit's custom firmware installed on your tablet" Foreground="#71717A" FontSize="10" Margin="0,1,0,0"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="0,4,6,0">
@@ -69,7 +73,7 @@
                 </StackPanel>
             </Grid>
 
-            <!-- Cards -->
+            <!-- Status Cards -->
             <StackPanel Grid.Row="1" Margin="16,16,16,10">
                 <!-- Game Status Card -->
                 <Border Background="#1C1C21" CornerRadius="10" Padding="14" Margin="0,0,0,10" BorderBrush="#27272A" BorderThickness="1">
