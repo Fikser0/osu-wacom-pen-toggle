@@ -6,8 +6,8 @@ This tool fixes input inconsistencies of 1000hz custom firmware flashed Wacom Ta
 By automatically **disabling your pen tip and buttons while playing a map**, then **instantly turning them back on** the moment you pause, fail, or return to the menu so you can navigate normally.
 
 > **Requirement:** You need a supported Wacom tablet running [shavit's custom firmware](https://files.shav.it/osu/tablet/).
-> | **osu! (stable)** | **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus. |
-> | **osu! (lazer)** | **Basic Support** | Automatically toggles between actively playing a beatmap and being in the menus. |
+- **osu! (stable)** | **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus. |
+- **osu! (lazer)** | **Basic Support** | Automatically toggles between actively playing a beatmap and being in the menus. |
 
 ---
 
