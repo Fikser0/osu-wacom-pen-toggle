@@ -20,7 +20,7 @@ By automatically **disabling your pen tip and buttons while playing a map**, the
 ---
 
 ## Why use this?
-Disabling the pen tip and buttons eliminates hardware-level input dinconsistencies which is thing yet to be fixed in custom firmwares.
+Disabling the pen tip and buttons eliminates hardware-level input dinconsistencies which is a thing yet to be fixed in custom firmwares.
 
 **This tool fixes that completely:**
 - **In Gameplay:** Pen tip and buttons are disabled for clean, consistent inputs.
