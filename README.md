@@ -1,12 +1,50 @@
 # osu! Wacom Pen Tip Auto-Toggle
 
-An ultra-low latency background utility for osu!(stable) and osu!(lazer) that automatically disables the Wacom pen tip during active gameplay and re-enables it in menus, pause screens, and song intros.
+Never worry about accidental clicks while aiming again. 
 
-> **Requirements:** This tool requires a supported Wacom tablet running [shavit's custom firmware](https://files.shav.it/osu/tablet/).
+This app automatically **disables your pen tip and buttons while playing a map**, then **instantly turns them back on** the moment you pause, fail, or return to the menu so you can navigate normally.
+
+> **Requirement:** You need a supported Wacom tablet running [shavit's custom firmware](https://files.shav.it/osu/tablet/).
+
+## Credits
+- **[shavit](https://github.com/shavitush)** — For creating the custom Wacom open firmware that makes hardware toggling possible.
+- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/OsuMemoryDataProvider)**.
+
+---
+
+## Why use this?
+If you drag your pen or accidentally tap the tablet surface while aiming, you normally have to disable your pen tip completely in your tablet drivers. However, doing that makes navigating song select, settings, and your desktop frustrating because your pen can't click anything.
+
+**This tool fixes that completely:**
+- **In Gameplay:** Your pen tip is disabled. Drag, tap, and hover freely with zero risk of accidental clicks.
+- **In Menus & Pauses:** Your pen tip works like a normal mouse again so you can select songs and click buttons effortlessly.
+
+---
 
 ## Features
-- **Ultra-low latency pause detection (~30ms):** Instantly turns the pen tip ON when pausing and OFF when resuming.
-- **Skip / Intro Detection:** Keeps pen tip active during intro until the first hit object appears.
-- **System Tray:** Minimizes to system tray quietly without cluttering the taskbar.
-- **Near-zero CPU usage (<0.1%):** Background thread reads memory at 15ms while UI updates are throttled.
-- **Single Instance:** Running the program again restores the existing instance from the tray.
+
+- **Instant Pause & Resume:** Pausing immediately re-enables your pen click. Resuming turns it off with zero noticeable delay.
+- **Smart Intro / Skip Detection:** Keep your pen clickable during the intro until the very first hit circle appears.
+- **Set It & Forget It:** Minimizes quietly to the system tray so your taskbar stays clean.
+- **Zero Impact on Performance:** Optimized to run silently in the background without causing lag or frame drops in osu!.
+- **Automatic Reconnect:** Plug or unplug your tablet anytime—the app automatically detects your device without needing a restart.
+
+---
+
+## Game Support
+
+| Version | Support Level | What's Supported |
+| :--- | :--- | :--- |
+| **osu! (stable)** | **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus. |
+| **osu! (lazer)** | **Basic Support** | Automatically toggles between actively playing a beatmap and being in the menus. |
+
+---
+
+## How to Use
+
+1. Make sure your Wacom tablet has [shavit's custom firmware](https://files.shav.it/osu/tablet/) installed.
+2. Launch **osu! Tablet Auto-Toggle**.
+3. Start playing osu!—the app handles everything automatically in the background.
+
+---
+
