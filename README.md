@@ -18,7 +18,7 @@ By automatically **disabling your pen tip and buttons while playing a map**, the
 
 ## Credits
 - **[shavit](https://github.com/shavitush)** — For creating custom 1000 hz Wacom firmwares with togglable Volatile memory settings.
-- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)**.
+- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)** allowing this app to detect osu! gameplay states.
 
 ---
 
