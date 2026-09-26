@@ -1,6 +1,6 @@
 # osu! Wacom Pen Tip Auto-Toggle
 
-Never worry about accidental clicks while aiming again. 
+This tool fixes input inconsistencies of 1000hz custom firmware flashed Wacom Tablets
 
 This app automatically **disables your pen tip and buttons while playing a map**, then **instantly turns them back on** the moment you pause, fail, or return to the menu so you can navigate normally.
 
@@ -8,7 +8,7 @@ This app automatically **disables your pen tip and buttons while playing a map**
 
 ## Credits
 - **[shavit](https://github.com/shavitush)** — For creating the custom Wacom open firmware that makes hardware toggling possible.
-- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/OsuMemoryDataProvider)**.
+- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)**.
 
 ---
 
