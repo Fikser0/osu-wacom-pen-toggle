@@ -17,7 +17,7 @@ By automatically **disabling your pen tip and buttons while playing a map**, the
 ---
 
 ## Credits
-- **[shavit](https://github.com/shavitush)** — For creating the custom Wacom open firmwares
+- **[shavit](https://github.com/shavitush)** — For creating the amazing custom Wacom firmwares with on Volatile memory settings and toggles.
 - **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)**.
 
 ---
