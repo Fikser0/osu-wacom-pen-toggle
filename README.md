@@ -2,9 +2,14 @@
 
 This tool fixes input inconsistencies of 1000hz custom firmware flashed Wacom Tablets
 
-This app automatically **disables your pen tip and buttons while playing a map**, then **instantly turns them back on** the moment you pause, fail, or return to the menu so you can navigate normally.
+
+By automatically **disabling your pen tip and buttons while playing a map**, then **instantly turning them back on** the moment you pause, fail, or return to the menu so you can navigate normally.
 
 > **Requirement:** You need a supported Wacom tablet running [shavit's custom firmware](https://files.shav.it/osu/tablet/).
+> | **osu! (stable)** | **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus. |
+> | **osu! (lazer)** | **Basic Support** | Automatically toggles between actively playing a beatmap and being in the menus. |
+
+---
 
 ## Credits
 - **[shavit](https://github.com/shavitush)** — For creating the custom Wacom open firmware that makes hardware toggling possible.
@@ -28,15 +33,6 @@ If you drag your pen or accidentally tap the tablet surface while aiming, you no
 - **Set It & Forget It:** Minimizes quietly to the system tray so your taskbar stays clean.
 - **Zero Impact on Performance:** Optimized to run silently in the background without causing lag or frame drops in osu!.
 - **Automatic Reconnect:** Plug or unplug your tablet anytime—the app automatically detects your device without needing a restart.
-
----
-
-## Game Support
-
-| Version | Support Level | What's Supported |
-| :--- | :--- | :--- |
-| **osu! (stable)** | **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus. |
-| **osu! (lazer)** | **Basic Support** | Automatically toggles between actively playing a beatmap and being in the menus. |
 
 ---
 
