@@ -45,7 +45,7 @@ Disabling the pen tip and buttons eliminates hardware-level input dinconsistenci
 ## How to Use
 
 1. Make sure your Wacom tablet has [shavit's custom firmware](https://files.shav.it/osu/tablet/) installed.
-2. Launch **osu! Tablet Auto-Toggle**.
+2. Launch **osu! Wacom Pen Tip Auto-Toggle**.
 3. Start playing osu!—the app handles everything automatically in the background.
 
 ---
