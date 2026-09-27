@@ -12,7 +12,7 @@ By automatically **disabling your pen tip and buttons while playing a map**, the
 - **osu! (lazer)** - **Basic Support** | Automatically toggles between actively playing a beatmap and being in the menus.
 
 **Tested on:** CTH-480, CTL-472, CTL-4100<br>
-**Platform:** Microsoft Windows
+**Platform:** Windows 10/11, requires NET 4.8
 
 ---
 
