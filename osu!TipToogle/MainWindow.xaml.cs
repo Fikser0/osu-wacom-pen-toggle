@@ -34,31 +34,27 @@ namespace osu_TipToogle
         private bool? _lastTargetState = null;
         private string _lastHardwareResult = "";
 
-        // Gameplay enter grace period (osu!stable)
+        // osu!stable tracking
         private OsuMemoryStatus _lastOsuStatus = OsuMemoryStatus.Unknown;
         private long _gameplayEnterMs = 0;
-
-        // Skip detection cache (osu!stable)
         private int _lastMapId = -1;
         private int _firstHitObjectTime = 0;
-
-        // Process tracking & Re-hook system (osu!stable)
         private int _lastStablePid = -1;
         private long _lastStableProcessCheckMs = 0;
         private long _lastRehookMs = 0;
         private int _consecutiveFailedReads = 0;
         private long _unknownStatusStartMs = 0;
 
-        // Cached window handle & rate limit for osu!(lazer)
+        // osu!(lazer) fallback window tracking
         private IntPtr _cachedLazerHwnd = IntPtr.Zero;
         private long _lastLazerScanMs = 0;
 
-        // Hardware Debounce (prevents on/off/on flashes during song selection/loading)
-        private const int HardwareDebounceMs = 100;
+        private const int MinHardwareToggleIntervalMs = 1000;
+        private long _lastHardwareToggleTimeMs = 0;
         private bool? _pendingHardwareState = null;
         private long _pendingHardwareStateStartTime = 0;
 
-        // UI Debounce
+        // UI transition smoothing
         private enum DisplayCategory
         {
             None = 0,
@@ -78,12 +74,12 @@ namespace osu_TipToogle
         private bool _appliedIsLazer = false;
         private string _appliedMenuStatusDetail = "";
 
-        // UI update throttling (eliminates WPF layout CPU overhead)
+        // UI rendering throttles
         private long _lastUiAudioUpdateMs = 0;
         private string _lastUiAudioText = "";
         private string _lastUiTabletInfo = "";
 
-        #region Win32 Window & Tray APIs
+        #region Native Win32 APIs
 
         [StructLayout(LayoutKind.Sequential)]
         private struct POINT
@@ -213,7 +209,7 @@ namespace osu_TipToogle
             source?.AddHook(HwndMessageHook);
         }
 
-        #region Tray Icon & Single Instance Unhide
+        #region Tray & Window Management
 
         protected override void OnStateChanged(EventArgs e)
         {
@@ -314,10 +310,12 @@ namespace osu_TipToogle
 
         private IntPtr HwndMessageHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            // Re-scan HID devices when hardware is plugged or unplugged
             if (msg == WM_DEVICECHANGE)
             {
                 WacomDevice.InvalidateCache();
                 _lastTargetState = null;
+                _lastHardwareToggleTimeMs = 0;
                 _lastDeviceSearchMs = 0;
             }
 
@@ -384,7 +382,6 @@ namespace osu_TipToogle
             }
             catch { }
 
-            // Explicit Func<Task> delegate eliminates CS4014 cleanly
             Task.Run(new Func<Task>(() => MonitorLoop(_cts.Token)));
         }
 
@@ -393,6 +390,8 @@ namespace osu_TipToogle
             _cts?.Cancel();
             _restoreWaitHandle?.Dispose();
             RemoveTrayIcon();
+
+            // Re-enable pen tip and buttons on exit
             WacomDevice.SetPressureAndButtons(true);
         }
 
@@ -415,7 +414,7 @@ namespace osu_TipToogle
             }
         }
 
-        #region Process & Window Detection Helpers
+        #region Process & Window Detection
 
         private int GetStableOsuProcessId(bool isCurrentlyReading)
         {
@@ -596,7 +595,7 @@ namespace osu_TipToogle
 
         #endregion
 
-        #region Time Formatting Helper (<10000 ms in ms, then mm:ss)
+        #region UI Helpers
 
         private static string FormatAudioTime(int ms)
         {
@@ -611,10 +610,6 @@ namespace osu_TipToogle
 
             return $"Song timeline: {minutes:D2}:{seconds:D2}";
         }
-
-        #endregion
-
-        #region Smooth Dot Color Animation (Fade)
 
         private static void AnimateDotColor(Shape dot, Color targetColor, int durationMs = 220)
         {
@@ -641,7 +636,6 @@ namespace osu_TipToogle
         }
 
         #endregion
-
 
         private async Task MonitorLoop(CancellationToken token)
         {
@@ -697,61 +691,70 @@ namespace osu_TipToogle
                         _unknownStatusStartMs = 0;
                     }
 
-                    if (status == OsuMemoryStatus.Playing &&
-                        (_lastOsuStatus != OsuMemoryStatus.Playing || audioTime < (_lastAudioTime - 1500)))
+                    bool isMapRestart = (status == OsuMemoryStatus.Playing) &&
+                                        (_lastOsuStatus != OsuMemoryStatus.Playing ||
+                                         (_lastAudioTime > 0 && audioTime <= 0) ||
+                                         audioTime < (_lastAudioTime - 1000));
+
+                    if (isMapRestart)
                     {
                         _gameplayEnterMs = now;
                         _frozenTicks = 0;
+                        _lastAudioTime = 0;
                     }
                     _lastOsuStatus = status;
 
                     if (status == OsuMemoryStatus.Playing)
                     {
-                        audioTimeText = FormatAudioTime(audioTime);
-
-                        if (audioTime <= 0 && (now - _gameplayEnterMs > 4000) && (now - _lastRehookMs > 3000))
-                        {
-                            ForceRehook(now);
-                        }
-
-                        if (audioTime == _lastAudioTime)
-                        {
-                            _frozenTicks++;
-                        }
-                        else
-                        {
-                            _frozenTicks = 0;
-                        }
-                        _lastAudioTime = audioTime;
-
                         if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId)
                         {
                             _lastMapId = _baseAddresses.Beatmap.Id;
                             _firstHitObjectTime = ResolveFirstHitObjectTime(_baseAddresses.Beatmap, currentStablePid);
                         }
 
-                        bool isSkipAvailable = (_firstHitObjectTime > 0 && audioTime < (_firstHitObjectTime - 3000))
-                                               || audioTime < 0;
+                        bool isStartingMap = (now - _gameplayEnterMs < 2000);
 
-                        bool isIntroGracePeriod = (now - _gameplayEnterMs < 1500);
-
-                        if (isIntroGracePeriod)
+                        if (isStartingMap)
                         {
                             _frozenTicks = 0;
-                            candidateCategory = DisplayCategory.SkipIntro;
-                        }
-                        // FAST PAUSE DETECTION: 2 ticks
-                        else if (_frozenTicks >= 2)
-                        {
-                            candidateCategory = DisplayCategory.Paused;
-                        }
-                        else if (isSkipAvailable)
-                        {
+                            _lastAudioTime = 0;
+                            audioTimeText = "Song timeline: 0 ms";
                             candidateCategory = DisplayCategory.SkipIntro;
                         }
                         else
                         {
-                            candidateCategory = DisplayCategory.Playing;
+                            audioTimeText = FormatAudioTime(audioTime);
+
+                            if (audioTime <= 0 && (now - _gameplayEnterMs > 4000) && (now - _lastRehookMs > 3000))
+                            {
+                                ForceRehook(now);
+                            }
+
+                            if (audioTime == _lastAudioTime)
+                            {
+                                _frozenTicks++;
+                            }
+                            else
+                            {
+                                _frozenTicks = 0;
+                            }
+                            _lastAudioTime = audioTime;
+
+                            bool isSkipAvailable = (_firstHitObjectTime > 0 && audioTime < (_firstHitObjectTime - 3000))
+                                                   || audioTime < 0;
+
+                            if (_frozenTicks >= 8)
+                            {
+                                candidateCategory = DisplayCategory.Paused;
+                            }
+                            else if (isSkipAvailable)
+                            {
+                                candidateCategory = DisplayCategory.SkipIntro;
+                            }
+                            else
+                            {
+                                candidateCategory = DisplayCategory.Playing;
+                            }
                         }
                     }
                     else
@@ -825,9 +828,7 @@ namespace osu_TipToogle
                     }
                 }
 
-                // -------------------------------------------------------------
-                // 1. HARDWARE TOGGLE: Instant on Pause/Resume, Debounced on Song Select
-                // -------------------------------------------------------------
+                // Hardware toggling logic (Immediate on Pause/Resume, debounced on Song Select)
                 bool isActivelyPlaying = (candidateCategory == DisplayCategory.Playing);
                 string? hardwareResult = null;
                 long currentMs = _stopwatch.ElapsedMilliseconds;
@@ -839,39 +840,39 @@ namespace osu_TipToogle
                     _lastTargetState = null;
                 }
 
-                bool isPauseResumeTransition =
-                    (_lastTargetState.HasValue &&
-                     ((_lastTargetState.Value && candidateCategory == DisplayCategory.Paused) ||
-                      (!_lastTargetState.Value && candidateCategory == DisplayCategory.Playing && _lastOsuStatus == OsuMemoryStatus.Playing)));
-
                 if (_lastTargetState == null)
                 {
-                    _lastTargetState = isActivelyPlaying;
                     _pendingHardwareState = isActivelyPlaying;
                     hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
-                    if (hardwareResult != null) _lastHardwareResult = hardwareResult;
+                    if (hardwareResult != null)
+                    {
+                        _lastHardwareResult = hardwareResult;
+                        if (!hardwareResult.StartsWith("ERR") && !hardwareResult.Contains("not found"))
+                        {
+                            _lastTargetState = isActivelyPlaying;
+                            _lastHardwareToggleTimeMs = currentMs;
+                        }
+                    }
                 }
                 else if (isActivelyPlaying != _lastTargetState)
                 {
-                    if (isPauseResumeTransition)
+                    if (_pendingHardwareState != isActivelyPlaying)
                     {
-                        _lastTargetState = isActivelyPlaying;
                         _pendingHardwareState = isActivelyPlaying;
-                        hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
-                        if (hardwareResult != null) _lastHardwareResult = hardwareResult;
+                        _pendingHardwareStateStartTime = currentMs;
                     }
-                    else
+
+                    if (currentMs - _lastHardwareToggleTimeMs >= MinHardwareToggleIntervalMs)
                     {
-                        if (_pendingHardwareState != isActivelyPlaying)
+                        hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
+                        if (hardwareResult != null)
                         {
-                            _pendingHardwareState = isActivelyPlaying;
-                            _pendingHardwareStateStartTime = currentMs;
-                        }
-                        else if (currentMs - _pendingHardwareStateStartTime >= HardwareDebounceMs)
-                        {
-                            _lastTargetState = isActivelyPlaying;
-                            hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
-                            if (hardwareResult != null) _lastHardwareResult = hardwareResult;
+                            _lastHardwareResult = hardwareResult;
+                            if (!hardwareResult.StartsWith("ERR") && !hardwareResult.Contains("not found"))
+                            {
+                                _lastTargetState = isActivelyPlaying;
+                                _lastHardwareToggleTimeMs = currentMs;
+                            }
                         }
                     }
                 }
@@ -880,9 +881,7 @@ namespace osu_TipToogle
                     _pendingHardwareState = isActivelyPlaying;
                 }
 
-                // -------------------------------------------------------------
-                // 2. UI TRANSITION: Instant on Pause & Resume; Debounced for other states
-                // -------------------------------------------------------------
+                // UI status update debounce
                 bool isPauseResumeUiTransition =
                     (candidateCategory == DisplayCategory.Paused && _currentAppliedCategory == DisplayCategory.Playing) ||
                     (candidateCategory == DisplayCategory.Playing && _currentAppliedCategory == DisplayCategory.Paused);
@@ -891,7 +890,6 @@ namespace osu_TipToogle
 
                 if (isPauseResumeUiTransition)
                 {
-                    // Instant UI update for pause and unpause
                     _currentAppliedCategory = candidateCategory;
                     _appliedIsLazer = isLazerCandidate;
                     _appliedMenuStatusDetail = menuStatusDetail;
@@ -927,27 +925,27 @@ namespace osu_TipToogle
                 {
                     case DisplayCategory.Playing:
                         gameStateText = _appliedIsLazer ? "Actively Playing (osu!Lazer)" : "Actively Playing";
-                        dotColor = Color.FromRgb(236, 72, 153); // Pink
+                        dotColor = Color.FromRgb(236, 72, 153);
                         break;
                     case DisplayCategory.SkipIntro:
                         gameStateText = "Intro / Skip Available";
-                        dotColor = Color.FromRgb(59, 130, 246); // Blue
+                        dotColor = Color.FromRgb(59, 130, 246);
                         break;
                     case DisplayCategory.Paused:
                         gameStateText = "Paused in Beatmap";
-                        dotColor = Color.FromRgb(234, 179, 8); // Yellow
+                        dotColor = Color.FromRgb(234, 179, 8);
                         break;
                     case DisplayCategory.Menu:
                         gameStateText = $"In Menu / Song Select ({_appliedMenuStatusDetail})";
-                        dotColor = Color.FromRgb(34, 197, 94); // Green
+                        dotColor = Color.FromRgb(34, 197, 94);
                         break;
                     case DisplayCategory.Connecting:
                         gameStateText = $"Connecting to osu!... ({_appliedMenuStatusDetail})";
-                        dotColor = Color.FromRgb(234, 179, 8); // Yellow
+                        dotColor = Color.FromRgb(234, 179, 8);
                         break;
                     default:
                         gameStateText = "Waiting for osu! to launch...";
-                        dotColor = Color.FromRgb(113, 113, 122); // Gray
+                        dotColor = Color.FromRgb(113, 113, 122);
                         break;
                 }
 

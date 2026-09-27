@@ -3,6 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace osu_TipToogle
 {
+    /// <summary>
+    /// Communicates with Wacom tablets running Shavit's custom firmware via HID Feature Reports.
+    /// Controls pen tip click and button exchange state at the hardware firmware level.
+    /// </summary>
     public static class WacomDevice
     {
         private const int VID_WACOM = 0x056A;
@@ -17,13 +21,17 @@ namespace osu_TipToogle
         private static string? _cachedDevicePath = null;
         private static byte _cachedReportId = 0;
         private static int _cachedReportLength = 0;
+        private static int _cachedWriteOffset = 1;
 
         public static void InvalidateCache()
         {
             _cachedDevicePath = null;
             _cachedReportId = 0;
             _cachedReportLength = 0;
+            _cachedWriteOffset = 1;
         }
+
+        #region SetupAPI & HID Native Imports
 
         [StructLayout(LayoutKind.Sequential)]
         private struct HIDD_ATTRIBUTES
@@ -72,6 +80,8 @@ namespace osu_TipToogle
 
         [DllImport("hid.dll", SetLastError = true)]
         private static extern bool HidD_SetFeature(IntPtr HidDeviceObject, byte[] lpReportBuffer, int ReportBufferLength);
+
+        #endregion
 
         public static string SetPressureAndButtons(bool enable)
         {
@@ -127,19 +137,18 @@ namespace osu_TipToogle
 
                 byte[] writeBuf = new byte[readBuf.Length];
                 writeBuf[0] = reportId;
-                writeBuf[1] = 84;
-                writeBuf[2] = 86;
-                writeBuf[3] = 1;
-                writeBuf[4] = readBuf[4];
-                writeBuf[5] = readBuf[5];
-                writeBuf[6] = (byte)(enable ? 1 : 0);
+
+                int offset = _cachedWriteOffset;
+                writeBuf[offset] = 84;
+                writeBuf[offset + 1] = 86;
+                writeBuf[offset + 2] = 1;
+                writeBuf[offset + 3] = readBuf[4];
+                writeBuf[offset + 4] = readBuf[5];
+                writeBuf[offset + 5] = (byte)(enable ? 1 : 0);
 
                 bool motionSyncSupported = (readBuf[7] & 4) != 0;
-                if (motionSyncSupported)
-                {
-                    writeBuf[7] = readBuf[8];
-                }
-                writeBuf[8] = 0;
+                writeBuf[offset + 6] = motionSyncSupported ? readBuf[8] : (byte)0;
+                writeBuf[offset + 7] = 0;
 
                 bool ok = HidD_SetFeature(handle, writeBuf, writeBuf.Length);
                 return ok ? (enable ? "Active (ON)" : "Disabled (OFF)") : null;
@@ -202,35 +211,36 @@ namespace osu_TipToogle
 
                             byte[]? readBuf = null;
                             byte reportId = 0;
-                            string detectedType = "";
 
+                            // Probe report 0x24 (CTL-472/672, CTL/CTH-480/680)
                             byte[] testCtl = new byte[32];
                             testCtl[0] = 36;
                             if (HidD_GetFeature(handle, testCtl, testCtl.Length) && testCtl[1] == 84 && testCtl[2] == 86 && testCtl[3] == 1)
                             {
                                 readBuf = testCtl;
                                 reportId = 36;
-                                detectedType = $"Wacom CTL (PID 0x{attr.ProductID:X4}, Report 0x24)";
                             }
                             else
                             {
+                                // Probe report 0x60 (PTK-x70, CTL-4100/6100)
                                 byte[] testPtk = new byte[64];
                                 testPtk[0] = 96;
                                 if (HidD_GetFeature(handle, testPtk, testPtk.Length) && testPtk[1] == 84 && testPtk[2] == 86 && testPtk[3] == 1)
                                 {
                                     readBuf = testPtk;
                                     reportId = 96;
-                                    detectedType = $"Wacom PTK (PID 0x{attr.ProductID:X4}, Report 0x60)";
                                 }
                             }
 
                             if (readBuf != null)
                             {
-                                LastDetectedModel = detectedType;
+                                var (modelName, writeOffset) = GetDeviceInfo(attr.ProductID, reportId);
+                                LastDetectedModel = $"{modelName} (Report 0x{reportId:X2})";
 
                                 _cachedDevicePath = devicePath;
                                 _cachedReportId = reportId;
                                 _cachedReportLength = readBuf.Length;
+                                _cachedWriteOffset = writeOffset;
 
                                 bool currentExchange = (readBuf[6] != 0);
                                 if (currentExchange == enable)
@@ -240,19 +250,18 @@ namespace osu_TipToogle
 
                                 byte[] writeBuf = new byte[readBuf.Length];
                                 writeBuf[0] = reportId;
-                                writeBuf[1] = 84;
-                                writeBuf[2] = 86;
-                                writeBuf[3] = 1;
-                                writeBuf[4] = readBuf[4];
-                                writeBuf[5] = readBuf[5];
-                                writeBuf[6] = (byte)(enable ? 1 : 0);
+
+                                int offset = _cachedWriteOffset;
+                                writeBuf[offset] = 84;
+                                writeBuf[offset + 1] = 86;
+                                writeBuf[offset + 2] = 1;
+                                writeBuf[offset + 3] = readBuf[4];
+                                writeBuf[offset + 4] = readBuf[5];
+                                writeBuf[offset + 5] = (byte)(enable ? 1 : 0);
 
                                 bool motionSyncSupported = (readBuf[7] & 4) != 0;
-                                if (motionSyncSupported)
-                                {
-                                    writeBuf[7] = readBuf[8];
-                                }
-                                writeBuf[8] = 0;
+                                writeBuf[offset + 6] = motionSyncSupported ? readBuf[8] : (byte)0;
+                                writeBuf[offset + 7] = 0;
 
                                 bool ok = HidD_SetFeature(handle, writeBuf, writeBuf.Length);
                                 return ok ? (enable ? "Active (ON)" : "Disabled (OFF)") : "ERR: SetFeature failed";
@@ -276,6 +285,38 @@ namespace osu_TipToogle
 
             LastDetectedModel = "Not Found";
             return "Tablet not found";
+        }
+
+        private static (string modelName, int writeOffset) GetDeviceInfo(ushort pid, byte reportId)
+        {
+            return pid switch
+            {
+                // CTL-480 / CTH-480 / CTL-680 / CTH-680
+                0x030E => ("Wacom CTH-480", 1),
+                0x0302 => ("Wacom CTL-480", 1),
+                0x0323 => ("Wacom CTH-680", 1),
+                0x0303 => ("Wacom CTL-680", 1),
+
+                // CTL-472 / CTL-672
+                0x037A => ("Wacom CTL-472", 1),
+                0x037B => ("Wacom CTL-672", 1),
+
+                // CTL-4100 / CTL-4100WL / CTL-6100 / CTL-6100WL
+                0x0374 => ("Wacom CTL-4100", 3),
+                0x0375 => ("Wacom CTL-6100", 3),
+                0x0376 => ("Wacom CTL-4100WL", 3),
+                0x0377 => ("Wacom CTL-6100WL", 3),
+                0x03C5 => ("Wacom CTL-4100WL", 3),
+
+                // PTK-470 / PTK-670 / PTK-870
+                0x03F5 => ("Wacom PTK-470", 1),
+                0x03F7 => ("Wacom PTK-670", 1),
+                0x03F9 => ("Wacom PTK-870", 1),
+
+                _ => reportId == 96
+                    ? ($"Wacom Intuos/PTK (PID 0x{pid:X4})", (pid == 0x0374 || pid == 0x0375 || pid == 0x0376 || pid == 0x0377 || pid == 0x03C5) ? 3 : 1)
+                    : ($"Wacom CTL (PID 0x{pid:X4})", 1)
+            };
         }
     }
 }
