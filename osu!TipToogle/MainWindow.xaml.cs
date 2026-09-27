@@ -241,10 +241,16 @@ namespace osu_TipToogle
 
         private string GetCurrentTipStatusText()
         {
-            if (WacomDevice.LastDetectedModel == "Not Found" ||
+            if (WacomDevice.LastDetectedModel.IndexOf("Not Found", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 _lastHardwareResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "Tablet not found";
+            }
+
+            if (_lastHardwareResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                WacomDevice.LastDetectedModel.IndexOf("Custom firmware not installed", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Custom firmware not installed";
             }
 
             return "Running";
@@ -833,11 +839,14 @@ namespace osu_TipToogle
                 string? hardwareResult = null;
                 long currentMs = _stopwatch.ElapsedMilliseconds;
 
-                if (_lastHardwareResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                    currentMs - _lastDeviceSearchMs > 2000)
+                bool isHwUnavailable = (_lastHardwareResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                        _lastHardwareResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                if (isHwUnavailable && currentMs - _lastDeviceSearchMs > 2000)
                 {
                     _lastDeviceSearchMs = currentMs;
                     _lastTargetState = null;
+                    _lastHardwareToggleTimeMs = 0;
                 }
 
                 if (_lastTargetState == null)
@@ -989,7 +998,10 @@ namespace osu_TipToogle
                             if (isWindowVisible)
                             {
                                 TxtTabletStatus.Text = $"Pen Tip & Buttons: {capturedHwResult}";
-                                Color tabletDotColor = (capturedHwResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0)
+                                bool isUnavailable = (capturedHwResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                      capturedHwResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                                Color tabletDotColor = isUnavailable
                                     ? Color.FromRgb(113, 113, 122)
                                     : (capturedIsPlaying ? Color.FromRgb(239, 68, 68) : Color.FromRgb(59, 130, 246));
                                 AnimateDotColor(TabletStatusDot, tabletDotColor);

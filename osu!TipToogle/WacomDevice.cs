@@ -172,6 +172,7 @@ namespace osu_TipToogle
 
             SP_DEVICE_INTERFACE_DATA ifData = new SP_DEVICE_INTERFACE_DATA();
             ifData.cbSize = Marshal.SizeOf(ifData);
+            string? stockDetectedModel = null;
 
             try
             {
@@ -208,6 +209,12 @@ namespace osu_TipToogle
                             attr.Size = Marshal.SizeOf(attr);
                             if (!HidD_GetAttributes(handle, ref attr) || attr.VendorID != VID_WACOM)
                                 continue;
+
+                            if (IsKnownSupportedModel(attr.ProductID) && stockDetectedModel == null)
+                            {
+                                var (knownName, _) = GetDeviceInfo(attr.ProductID, 0);
+                                stockDetectedModel = knownName;
+                            }
 
                             byte[]? readBuf = null;
                             byte reportId = 0;
@@ -283,8 +290,26 @@ namespace osu_TipToogle
                 SetupDiDestroyDeviceInfoList(hDevInfo);
             }
 
+            if (stockDetectedModel != null)
+            {
+                LastDetectedModel = $"{stockDetectedModel} (Custom firmware not installed)";
+                return "Not available";
+            }
+
             LastDetectedModel = "Not Found";
             return "Tablet not found";
+        }
+
+        private static bool IsKnownSupportedModel(ushort pid)
+        {
+            return pid switch
+            {
+                0x030E or 0x0302 or 0x0323 or 0x0303 => true,
+                0x037A or 0x037B => true,
+                0x0374 or 0x0375 or 0x0376 or 0x0377 or 0x03C5 => true,
+                0x03F5 or 0x03F7 or 0x03F9 => true,
+                _ => false
+            };
         }
 
         private static (string modelName, int writeOffset) GetDeviceInfo(ushort pid, byte reportId)
