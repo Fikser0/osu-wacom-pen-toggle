@@ -82,8 +82,8 @@
                         <Ellipse x:Name="GameStatusDot" Width="12" Height="12" Fill="#71717A" VerticalAlignment="Center" Margin="0,0,12,0"/>
                         <StackPanel Grid.Column="1">
                             <TextBlock Text="GAME STATE" Foreground="#A1A1AA" FontSize="10" FontWeight="Bold"/>
-                            <TextBlock x:Name="TxtGameStatus" Text="Waiting for osu!..." Foreground="White" FontSize="14" FontWeight="Medium" Margin="0,2,0,0"/>
-                            <TextBlock x:Name="TxtAudioTime" Text="Song timeline: 0 ms" Foreground="#71717A" FontSize="11" Margin="0,2,0,0"/>
+                            <TextBlock x:Name="TxtGameStatus" Text="Waiting for osu! to launch..." Foreground="White" FontSize="14" FontWeight="Medium" Margin="0,2,0,0"/>
+                            <TextBlock x:Name="TxtAudioTime" Text="See you next time..." Foreground="#71717A" FontSize="11" Margin="0,2,0,0"/>
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -99,7 +99,7 @@
                         <Ellipse x:Name="TabletStatusDot" Width="12" Height="12" Fill="#3B82F6" VerticalAlignment="Center" Margin="0,0,12,0"/>
                         <StackPanel Grid.Column="1">
                             <TextBlock Text="TABLET HARDWARE" Foreground="#A1A1AA" FontSize="10" FontWeight="Bold"/>
-                            <TextBlock x:Name="TxtTabletStatus" Text="Pen Tip &amp; Buttons: Tablet not found" Foreground="White" FontSize="14" FontWeight="Medium" Margin="0,2,0,0"/>
+                            <TextBlock x:Name="TxtTabletStatus" Text="Pressure &amp; Buttons: Tablet not found" Foreground="White" FontSize="14" FontWeight="Medium" Margin="0,2,0,0"/>
                             <TextBlock x:Name="TxtDetectedTablet" Text="Device: Searching..." Foreground="#71717A" FontSize="11" Margin="0,2,0,0"/>
                         </StackPanel>
                     </Grid>

@@ -855,7 +855,7 @@ namespace osu_TipToogle
                     else
                     {
                         candidateCategory = DisplayCategory.Waiting;
-                        audioTimeText = "Song timeline: 0 ms";
+                        audioTimeText = "See you next time...";
                     }
                 }
 
@@ -968,7 +968,7 @@ namespace osu_TipToogle
                     case DisplayCategory.SkipIntro:
                         gameStateText = $"{clientPrefix}Intro skip available";
                         dotColor = Color.FromRgb(59, 130, 246);
-                        break; ;
+                        break;
                     case DisplayCategory.Paused:
                         gameStateText = $"{clientPrefix}Paused in beatmap";
                         dotColor = Color.FromRgb(234, 179, 8);
@@ -1029,7 +1029,7 @@ namespace osu_TipToogle
                         {
                             if (isWindowVisible)
                             {
-                                TxtTabletStatus.Text = $"Pen Tip & Buttons: {capturedHwResult}";
+                                TxtTabletStatus.Text = $"Pressure & Buttons: {capturedHwResult}";
                                 bool isUnavailable = (capturedHwResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
                                                       capturedHwResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
 
