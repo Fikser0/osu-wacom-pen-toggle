@@ -9,7 +9,7 @@ By automatically **disabling your pen tip and buttons while playing a map**, the
 
 > **Requirement:** You need a supported Wacom tablet running [shavit's custom firmware](https://files.shav.it/osu/tablet/).
 - **osu! (stable)** - **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus.
-- **osu! (lazer)** - **Basic Support** | Detects whether you are playing a map or in the menu / song select. Pause, intro, and failed screens are not detected.
+- **osu! (lazer)** - **Basic Support** | Only detects whether you are playing a beatmap or are in the menu / song select.
 
 **Tested on:** CTH-480, CTL-472, CTL-4100<br>
 **Platform:** Windows 10/11, requires NET 4.8
