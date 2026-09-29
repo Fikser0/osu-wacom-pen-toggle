@@ -31,6 +31,7 @@ namespace osu_TipToogle
 
         private int _lastAudioTime = -1;
         private int _frozenTicks = 0;
+        private bool _hasAudioStarted = false;
         private bool? _lastTargetState = null;
         private string _lastHardwareResult = "";
 
@@ -605,6 +606,7 @@ namespace osu_TipToogle
             _baseAddresses = new OsuBaseAddresses();
             _lastRehookMs = now;
             _frozenTicks = 0;
+            _hasAudioStarted = false;
             _lastAudioTime = -1;
             _lastMapId = -1;
             _firstHitObjectTime = 0;
@@ -689,6 +691,11 @@ namespace osu_TipToogle
                     if (readGeneral)
                     {
                         readBeatmap = _reader.TryRead(_baseAddresses.Beatmap);
+                        if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId && _baseAddresses.Beatmap.Id > 0)
+                        {
+                            _lastMapId = _baseAddresses.Beatmap.Id;
+                            (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
+                        }
                     }
                 }
                 lastReadGeneral = readGeneral;
@@ -719,82 +726,93 @@ namespace osu_TipToogle
                         _unknownStatusStartMs = 0;
                     }
 
-                    bool isMapRestart = (status == OsuMemoryStatus.Playing) &&
-                                        (_lastOsuStatus != OsuMemoryStatus.Playing ||
-                                         (_lastAudioTime > 0 && audioTime <= 0) ||
-                                         audioTime < (_lastAudioTime - 1000));
+                    if (status == OsuMemoryStatus.Playing && audioTime == 0 && _lastAudioTime < -50)
+                    {
+                        audioTime = _lastAudioTime;
+                    }
 
-                    if (isMapRestart)
+                    bool isInitialAttachToPlaying = (_lastOsuStatus == OsuMemoryStatus.Unknown && status == OsuMemoryStatus.Playing);
+
+                    bool isMapRestart = (status == OsuMemoryStatus.Playing) &&
+                                        (!isInitialAttachToPlaying && _lastOsuStatus != OsuMemoryStatus.Playing ||
+                                         (_hasAudioStarted && (audioTime < (_lastAudioTime - 500) || (_lastAudioTime > 0 && audioTime <= 0))));
+
+                    if (isInitialAttachToPlaying)
+                    {
+                        _hasAudioStarted = true;
+                        _gameplayEnterMs = now - 5000;
+                        _lastAudioTime = audioTime;
+                    }
+                    else if (isMapRestart)
                     {
                         _gameplayEnterMs = now;
                         _frozenTicks = 0;
+                        _hasAudioStarted = false;
                         _lastAudioTime = audioTime;
                     }
                     _lastOsuStatus = status;
 
                     if (status == OsuMemoryStatus.Playing)
                     {
-                        if (readBeatmap && (_baseAddresses.Beatmap.Id != _lastMapId || _firstHitObjectTime == 0))
+                        if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId)
                         {
                             _lastMapId = _baseAddresses.Beatmap.Id;
                             (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
                         }
 
-                        const int FirstNoteLeadTimeMs = 500;
+                        long elapsedFromEnter = now - _gameplayEnterMs;
 
-                        bool isNearFirstHitObject = (_firstHitObjectTime > 0) &&
-                            (_firstHitObjectTime <= FirstNoteLeadTimeMs ||
-                             (audioTime >= (_firstHitObjectTime - FirstNoteLeadTimeMs) && audioTime <= _firstHitObjectTime + 2000));
-
-                        bool isStartingMap = (now - _gameplayEnterMs < 2000) && !isNearFirstHitObject;
-
-                        if (isStartingMap)
+                        if (!_hasAudioStarted && _lastAudioTime != -1 && audioTime > _lastAudioTime)
                         {
-                            _frozenTicks = 0;
-                            _lastAudioTime = audioTime;
-                            audioTimeText = audioTime <= 0 ? "Song timeline: 0 ms" : FormatAudioTime(audioTime);
-                            candidateCategory = DisplayCategory.SkipIntro;
+                            _hasAudioStarted = true;
+                        }
+
+                        if (!_hasAudioStarted && elapsedFromEnter < 600)
+                        {
+                            audioTimeText = "Song timeline: Loading...";
                         }
                         else
                         {
                             audioTimeText = FormatAudioTime(audioTime);
+                        }
 
-                            if (audioTime <= 0 && (now - _gameplayEnterMs > 4000) && (now - _lastRehookMs > 3000))
-                            {
-                                ForceRehook(now);
-                            }
+                        if (!_hasAudioStarted)
+                        {
+                            _frozenTicks = 0;
+                        }
+                        else if (audioTime == _lastAudioTime)
+                        {
+                            _frozenTicks++;
+                        }
+                        else
+                        {
+                            _frozenTicks = 0;
+                        }
+                        _lastAudioTime = audioTime;
 
-                            if (audioTime == _lastAudioTime)
-                            {
-                                _frozenTicks++;
-                            }
-                            else
-                            {
-                                _frozenTicks = 0;
-                            }
-                            _lastAudioTime = audioTime;
+                        bool isUnknownDuringLoad = (_firstHitObjectTime <= 0 && elapsedFromEnter < 500);
+                        bool isLongIntro = _firstHitObjectTime >= 3000 && (!_hasAudioStarted || audioTime < (_firstHitObjectTime - 1000));
+                        bool isIntro = isLongIntro || isUnknownDuringLoad;
 
-                            bool isIntro = (_firstHitObjectTime > FirstNoteLeadTimeMs) &&
-                                           (audioTime < (_firstHitObjectTime - FirstNoteLeadTimeMs));
-                            isOutro = (_lastHitObjectTime > 0 && audioTime > (_lastHitObjectTime + LastNoteDelayMs));
+                        isOutro = _hasAudioStarted && (_lastHitObjectTime > 0 && audioTime > (_lastHitObjectTime + LastNoteDelayMs));
 
-                            if (_frozenTicks >= 8)
-                            {
-                                candidateCategory = DisplayCategory.Paused;
-                            }
-                            else if (isIntro)
-                            {
-                                candidateCategory = DisplayCategory.SkipIntro;
-                            }
-                            else
-                            {
-                                candidateCategory = DisplayCategory.Playing;
-                            }
+                        if (_frozenTicks >= 8)
+                        {
+                            candidateCategory = DisplayCategory.Paused;
+                        }
+                        else if (isIntro)
+                        {
+                            candidateCategory = DisplayCategory.SkipIntro;
+                        }
+                        else
+                        {
+                            candidateCategory = DisplayCategory.Playing;
                         }
                     }
                     else
                     {
                         _frozenTicks = 0;
+                        _hasAudioStarted = false;
                         menuStatusDetail = FormatMenuStatus(status);
                         audioTimeText = FormatAudioTime(audioTime);
                         candidateCategory = DisplayCategory.Menu;
@@ -900,7 +918,7 @@ namespace osu_TipToogle
                         _pendingHardwareStateStartTime = currentMs;
                     }
 
-                    if (isActivelyPlaying || (currentMs - _lastHardwareToggleTimeMs >= MinHardwareToggleIntervalMs))
+                    if (currentMs - _lastHardwareToggleTimeMs >= MinHardwareToggleIntervalMs)
                     {
                         hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
                         if (hardwareResult != null)
