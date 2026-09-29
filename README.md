@@ -26,7 +26,7 @@ By automatically **disabling your pen tip and buttons while playing a map**, the
 Disabling the pen tip and buttons eliminates hardware-level input inconsistencies which is a thing yet to be fixed in custom firmwares.
 
 **This tool fixes that completely:**
-- **In Gameplay:** Pen tip and buttons are disabled for clean, consistent inputs.
+- **In Gameplay:** Pen tip and buttons are disabled for more consistent inputs.
 - **In Menus & Pauses:** Re-enabled instantly so you can navigate osu! normally with your pen.
 
 ---
@@ -35,7 +35,7 @@ Disabling the pen tip and buttons eliminates hardware-level input inconsistencie
 
 - **Pause/resume toggle:** Turns buttons back on the instant you pause, and shuts them off immediately when you resume playing.
 - **Intro & skip support:** Leaves clicks enabled during song intros so you can skip or retry until the first hit object actually appears.<br>
-  (osu!stable only)
+  *(osu!stable only)*
 - **Runs in tray:** Minimizes to the system tray.
 - **Lightweight:** Negligible CPU usage (<1%).
 - **Hotplug support:** Automatically picks up the tablet if you reconnect it without needing to restart the app.
