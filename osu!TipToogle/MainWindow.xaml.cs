@@ -39,6 +39,7 @@ namespace osu_TipToogle
         private long _gameplayEnterMs = 0;
         private int _lastMapId = -1;
         private int _firstHitObjectTime = 0;
+        private int _lastHitObjectTime = 0;
         private int _lastStablePid = -1;
         private long _lastStableProcessCheckMs = 0;
         private long _lastRehookMs = 0;
@@ -66,9 +67,12 @@ namespace osu_TipToogle
             Playing
         }
 
+        private const int LastNoteDelayMs = 100;
+
         private const int UiDebounceMs = 450;
         private DisplayCategory _pendingCategory = DisplayCategory.None;
         private bool _pendingIsLazer = false;
+        private string _pendingMenuStatusDetail = "";
         private long _pendingCategoryStartTime = 0;
         private DisplayCategory _currentAppliedCategory = DisplayCategory.None;
         private bool _appliedIsLazer = false;
@@ -397,7 +401,6 @@ namespace osu_TipToogle
             _restoreWaitHandle?.Dispose();
             RemoveTrayIcon();
 
-            // Re-enable pen tip and buttons on exit
             WacomDevice.SetPressureAndButtons(true);
         }
 
@@ -580,6 +583,23 @@ namespace osu_TipToogle
             return len > 0 ? sb.ToString() : string.Empty;
         }
 
+        private static string FormatMenuStatus(OsuMemoryStatus status)
+        {
+            return status.ToString() switch
+            {
+                "SongSelect" => "Song select",
+                "SongSelectEdit" => "Editor song select",
+                "ResultsScreen" => "Result screen",
+                "MainMenu" => "Main menu",
+                "MultiplayerRoom" => "Multiplayer room",
+                "MultiplayerSongSelect" => "Multiplayer song select",
+                "EditingMap" => "Beatmap editor",
+                "OsuDirect" => "In osu!direct",
+                "GameShutdownAnimation" => "Exiting...",
+                string s => s
+            };
+        }
+
         private void ForceRehook(long now)
         {
             _baseAddresses = new OsuBaseAddresses();
@@ -588,6 +608,7 @@ namespace osu_TipToogle
             _lastAudioTime = -1;
             _lastMapId = -1;
             _firstHitObjectTime = 0;
+            _lastHitObjectTime = 0;
             _unknownStatusStartMs = 0;
 
             try
@@ -674,6 +695,7 @@ namespace osu_TipToogle
 
                 DisplayCategory candidateCategory;
                 bool isLazerCandidate = false;
+                bool isOutro = false;
                 string audioTimeText = "";
                 string menuStatusDetail = "";
 
@@ -715,7 +737,7 @@ namespace osu_TipToogle
                         if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId)
                         {
                             _lastMapId = _baseAddresses.Beatmap.Id;
-                            _firstHitObjectTime = ResolveFirstHitObjectTime(_baseAddresses.Beatmap, currentStablePid);
+                            (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
                         }
 
                         bool isStartingMap = (now - _gameplayEnterMs < 2000);
@@ -746,14 +768,14 @@ namespace osu_TipToogle
                             }
                             _lastAudioTime = audioTime;
 
-                            bool isSkipAvailable = (_firstHitObjectTime > 0 && audioTime < (_firstHitObjectTime - 3000))
-                                                   || audioTime < 0;
+                            bool isIntro = (_firstHitObjectTime > 0 && audioTime < (_firstHitObjectTime - 3000)) || audioTime < 0;
+                            isOutro = (_lastHitObjectTime > 0 && audioTime > (_lastHitObjectTime + LastNoteDelayMs));
 
                             if (_frozenTicks >= 8)
                             {
                                 candidateCategory = DisplayCategory.Paused;
                             }
-                            else if (isSkipAvailable)
+                            else if (isIntro)
                             {
                                 candidateCategory = DisplayCategory.SkipIntro;
                             }
@@ -768,7 +790,8 @@ namespace osu_TipToogle
                         _frozenTicks = 0;
                         _lastMapId = -1;
                         _firstHitObjectTime = 0;
-                        menuStatusDetail = status.ToString();
+                        _lastHitObjectTime = 0;
+                        menuStatusDetail = FormatMenuStatus(status);
                         audioTimeText = FormatAudioTime(audioTime);
                         candidateCategory = DisplayCategory.Menu;
                     }
@@ -779,6 +802,7 @@ namespace osu_TipToogle
                     _frozenTicks = 0;
                     _lastMapId = -1;
                     _firstHitObjectTime = 0;
+                    _lastHitObjectTime = 0;
                     _lastOsuStatus = OsuMemoryStatus.Unknown;
                     _unknownStatusStartMs = 0;
                     isLazerCandidate = false;
@@ -790,13 +814,13 @@ namespace osu_TipToogle
 
                     if (_consecutiveFailedReads > 20)
                     {
-                        audioTimeText = "Re-hooking... (Run as Admin if stuck)";
-                        menuStatusDetail = "Retrying Hook";
+                        audioTimeText = "Try to \"Run as Admin\" if stuck";
+                        menuStatusDetail = "Re-hooking...";
                     }
                     else
                     {
-                        audioTimeText = "Hooking osu! memory...";
-                        menuStatusDetail = "Connecting";
+                        audioTimeText = "Connecting";
+                        menuStatusDetail = "Hooking memory...";
                     }
 
                     candidateCategory = DisplayCategory.Connecting;
@@ -806,6 +830,7 @@ namespace osu_TipToogle
                     _frozenTicks = 0;
                     _lastMapId = -1;
                     _firstHitObjectTime = 0;
+                    _lastHitObjectTime = 0;
                     _lastOsuStatus = OsuMemoryStatus.Unknown;
                     _unknownStatusStartMs = 0;
                     _consecutiveFailedReads = 0;
@@ -823,8 +848,8 @@ namespace osu_TipToogle
                         else
                         {
                             candidateCategory = DisplayCategory.Menu;
-                            menuStatusDetail = "osu!Lazer";
-                            audioTimeText = "Song timeline: In Menus";
+                            menuStatusDetail = "In menus";
+                            audioTimeText = "Waiting for gameplay";
                         }
                     }
                     else
@@ -834,8 +859,8 @@ namespace osu_TipToogle
                     }
                 }
 
-                // Hardware toggling logic (Immediate on Pause/Resume, debounced on Song Select)
-                bool isActivelyPlaying = (candidateCategory == DisplayCategory.Playing);
+                // Hardware rate-limited toggling (prevents MCU / digitizer desync at 1000Hz)
+                bool isActivelyPlaying = (candidateCategory == DisplayCategory.Playing) && !isOutro;
                 string? hardwareResult = null;
                 long currentMs = _stopwatch.ElapsedMilliseconds;
 
@@ -904,25 +929,27 @@ namespace osu_TipToogle
                     _appliedMenuStatusDetail = menuStatusDetail;
                     _pendingCategory = candidateCategory;
                     _pendingIsLazer = isLazerCandidate;
+                    _pendingMenuStatusDetail = menuStatusDetail;
                     _pendingCategoryStartTime = currentMs;
                     uiStateChanged = true;
                 }
                 else
                 {
-                    if (candidateCategory != _pendingCategory || isLazerCandidate != _pendingIsLazer)
+                    if (candidateCategory != _pendingCategory || isLazerCandidate != _pendingIsLazer || menuStatusDetail != _pendingMenuStatusDetail)
                     {
                         _pendingCategory = candidateCategory;
                         _pendingIsLazer = isLazerCandidate;
+                        _pendingMenuStatusDetail = menuStatusDetail;
                         _pendingCategoryStartTime = currentMs;
                     }
 
                     if (_currentAppliedCategory == DisplayCategory.None ||
-                        ((_pendingCategory != _currentAppliedCategory || _pendingIsLazer != _appliedIsLazer) &&
+                        ((_pendingCategory != _currentAppliedCategory || _pendingIsLazer != _appliedIsLazer || _pendingMenuStatusDetail != _appliedMenuStatusDetail) &&
                          (currentMs - _pendingCategoryStartTime >= UiDebounceMs)))
                     {
                         _currentAppliedCategory = _pendingCategory;
                         _appliedIsLazer = _pendingIsLazer;
-                        _appliedMenuStatusDetail = menuStatusDetail;
+                        _appliedMenuStatusDetail = _pendingMenuStatusDetail;
                         uiStateChanged = true;
                     }
                 }
@@ -930,26 +957,31 @@ namespace osu_TipToogle
                 string gameStateText;
                 Color dotColor;
 
+                string clientPrefix = _appliedIsLazer ? "osu!(Lazer): " : "osu!(stable): ";
+
                 switch (_currentAppliedCategory)
                 {
                     case DisplayCategory.Playing:
-                        gameStateText = _appliedIsLazer ? "Actively Playing (osu!Lazer)" : "Actively Playing";
+                        gameStateText = $"{clientPrefix}Gameplay in beatmap";
                         dotColor = Color.FromRgb(236, 72, 153);
                         break;
                     case DisplayCategory.SkipIntro:
-                        gameStateText = "Intro / Skip Available";
+                        gameStateText = $"{clientPrefix}Intro skip available";
                         dotColor = Color.FromRgb(59, 130, 246);
-                        break;
+                        break; ;
                     case DisplayCategory.Paused:
-                        gameStateText = "Paused in Beatmap";
+                        gameStateText = $"{clientPrefix}Paused in beatmap";
                         dotColor = Color.FromRgb(234, 179, 8);
                         break;
                     case DisplayCategory.Menu:
-                        gameStateText = $"In Menu / Song Select ({_appliedMenuStatusDetail})";
+                        string menuDetail = _appliedIsLazer
+                            ? "In menus"
+                            : (string.IsNullOrEmpty(_appliedMenuStatusDetail) ? "Main menu" : _appliedMenuStatusDetail);
+                        gameStateText = $"{clientPrefix}{menuDetail}";
                         dotColor = Color.FromRgb(34, 197, 94);
                         break;
                     case DisplayCategory.Connecting:
-                        gameStateText = $"Connecting to osu!... ({_appliedMenuStatusDetail})";
+                        gameStateText = $"{clientPrefix}{_appliedMenuStatusDetail}";
                         dotColor = Color.FromRgb(234, 179, 8);
                         break;
                     default:
@@ -1027,12 +1059,12 @@ namespace osu_TipToogle
             }
         }
 
-        private int ResolveFirstHitObjectTime(CurrentBeatmap beatmap, int stablePid)
+        private (int firstTime, int lastTime) ResolveHitObjectTimes(CurrentBeatmap beatmap, int stablePid)
         {
             try
             {
                 if (string.IsNullOrEmpty(beatmap.FolderName) || string.IsNullOrEmpty(beatmap.OsuFileName))
-                    return 0;
+                    return (0, 0);
 
                 string? osuFolder = null;
                 if (stablePid > 0)
@@ -1060,36 +1092,84 @@ namespace osu_TipToogle
                 {
                     string fallbackPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu!", "Songs", beatmap.FolderName, beatmap.OsuFileName);
                     if (File.Exists(fallbackPath)) mapPath = fallbackPath;
-                    else return 0;
+                    else return (0, 0);
                 }
 
                 using var fs = new FileStream(mapPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using var sr = new StreamReader(fs, Encoding.UTF8);
 
+                bool inGeneral = false;
                 bool inHitObjects = false;
+                int firstHitObjectTime = 0;
+                int lastHitObjectTime = 0;
                 string? line;
+
                 while ((line = sr.ReadLine()) != null)
                 {
-                    if (line.Trim() == "[HitObjects]")
+                    string trimmed = line.Trim();
+                    if (trimmed == "[General]")
                     {
+                        inGeneral = true;
+                        inHitObjects = false;
+                        continue;
+                    }
+                    if (trimmed == "[HitObjects]")
+                    {
+                        inGeneral = false;
                         inHitObjects = true;
                         continue;
+                    }
+                    if (trimmed.StartsWith("["))
+                    {
+                        inGeneral = false;
+                        inHitObjects = false;
+                        continue;
+                    }
+
+                    // Only support standard osu! (Mode: 0) - ignore Taiko, Catch, Mania
+                    if (inGeneral && trimmed.StartsWith("Mode:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string modeVal = trimmed.Substring(5).Trim();
+                        if (int.TryParse(modeVal, out int mode) && mode != 0)
+                        {
+                            return (0, 0);
+                        }
                     }
 
                     if (inHitObjects && !string.IsNullOrWhiteSpace(line))
                     {
                         var parts = line.Split(',');
-                        if (parts.Length > 2 && int.TryParse(parts[2], out int firstTime))
+                        if (parts.Length > 2 && int.TryParse(parts[2], out int objTime))
                         {
-                            return firstTime;
+                            if (firstHitObjectTime == 0)
+                            {
+                                firstHitObjectTime = objTime;
+                            }
+
+                            int endTime = objTime;
+
+                            if (parts.Length > 3 && int.TryParse(parts[3], out int objType))
+                            {
+                                // Spinner (type bit 3) ends at parts[5]
+                                if ((objType & 8) != 0 && parts.Length > 5 && int.TryParse(parts[5], out int spinnerEnd))
+                                {
+                                    endTime = spinnerEnd;
+                                }
+                            }
+
+                            if (endTime > lastHitObjectTime)
+                            {
+                                lastHitObjectTime = endTime;
+                            }
                         }
-                        break;
                     }
                 }
+
+                return (firstHitObjectTime, lastHitObjectTime);
             }
             catch { }
 
-            return 0;
+            return (0, 0);
         }
     }
 }

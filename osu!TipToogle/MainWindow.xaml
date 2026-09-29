@@ -59,11 +59,7 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="14,6,0,0">
-                    <TextBlock Foreground="#E4E4E7" FontSize="17" FontWeight="SemiBold">
-                        <Run Text="osu!"/>
-                        <Run Text="Wacom Pen Tip"/>
-                        <Run Text="Auto-Toggle"/>
-                    </TextBlock>
+                    <TextBlock Text="osu! Pen Tip Auto-Toggle" Foreground="#E4E4E7" FontSize="17" FontWeight="SemiBold"/>
                     <TextBlock Text="Requires shavit's custom firmware installed on your tablet" Foreground="#71717A" FontSize="10" Margin="0,1,0,0"/>
                 </StackPanel>
 

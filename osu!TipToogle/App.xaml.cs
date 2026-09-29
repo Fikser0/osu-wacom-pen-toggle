@@ -4,9 +4,6 @@ using System.Windows;
 
 namespace osu_TipToogle
 {
-    /// <summary>
-    /// Interaction logic for App.xaml
-    /// </summary>
     public partial class App : Application
     {
         private const string MutexName = "osu_TipToggle_SingleInstance_Mutex";
@@ -22,7 +19,6 @@ namespace osu_TipToogle
 
             if (!_hasHandle)
             {
-                // Signal existing instance in tray to unhide & restore
                 try
                 {
                     if (EventWaitHandle.TryOpenExisting(RestoreEventName, out EventWaitHandle? restoreEvent))
@@ -33,7 +29,7 @@ namespace osu_TipToogle
                 }
                 catch
                 {
-                    // Ignore signaling errors
+
                 }
 
                 Shutdown();
@@ -53,8 +49,9 @@ namespace osu_TipToogle
                 }
                 catch
                 {
-                    // Ignore release errors during shutdown
+                    
                 }
+
                 _mutex.Dispose();
                 _mutex = null;
                 _hasHandle = false;
