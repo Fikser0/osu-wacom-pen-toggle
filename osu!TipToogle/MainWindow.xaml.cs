@@ -728,25 +728,31 @@ namespace osu_TipToogle
                     {
                         _gameplayEnterMs = now;
                         _frozenTicks = 0;
-                        _lastAudioTime = 0;
+                        _lastAudioTime = audioTime;
                     }
                     _lastOsuStatus = status;
 
                     if (status == OsuMemoryStatus.Playing)
                     {
-                        if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId)
+                        if (readBeatmap && (_baseAddresses.Beatmap.Id != _lastMapId || _firstHitObjectTime == 0))
                         {
                             _lastMapId = _baseAddresses.Beatmap.Id;
                             (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
                         }
 
-                        bool isStartingMap = (now - _gameplayEnterMs < 2000);
+                        const int FirstNoteLeadTimeMs = 500;
+
+                        bool isNearFirstHitObject = (_firstHitObjectTime > 0) &&
+                            (_firstHitObjectTime <= FirstNoteLeadTimeMs ||
+                             (audioTime >= (_firstHitObjectTime - FirstNoteLeadTimeMs) && audioTime <= _firstHitObjectTime + 2000));
+
+                        bool isStartingMap = (now - _gameplayEnterMs < 2000) && !isNearFirstHitObject;
 
                         if (isStartingMap)
                         {
                             _frozenTicks = 0;
-                            _lastAudioTime = 0;
-                            audioTimeText = "Song timeline: 0 ms";
+                            _lastAudioTime = audioTime;
+                            audioTimeText = audioTime <= 0 ? "Song timeline: 0 ms" : FormatAudioTime(audioTime);
                             candidateCategory = DisplayCategory.SkipIntro;
                         }
                         else
@@ -768,7 +774,8 @@ namespace osu_TipToogle
                             }
                             _lastAudioTime = audioTime;
 
-                            bool isIntro = (_firstHitObjectTime > 0 && audioTime < (_firstHitObjectTime - 3000)) || audioTime < 0;
+                            bool isIntro = (_firstHitObjectTime > FirstNoteLeadTimeMs) &&
+                                           (audioTime < (_firstHitObjectTime - FirstNoteLeadTimeMs));
                             isOutro = (_lastHitObjectTime > 0 && audioTime > (_lastHitObjectTime + LastNoteDelayMs));
 
                             if (_frozenTicks >= 8)
@@ -788,9 +795,6 @@ namespace osu_TipToogle
                     else
                     {
                         _frozenTicks = 0;
-                        _lastMapId = -1;
-                        _firstHitObjectTime = 0;
-                        _lastHitObjectTime = 0;
                         menuStatusDetail = FormatMenuStatus(status);
                         audioTimeText = FormatAudioTime(audioTime);
                         candidateCategory = DisplayCategory.Menu;
@@ -896,7 +900,7 @@ namespace osu_TipToogle
                         _pendingHardwareStateStartTime = currentMs;
                     }
 
-                    if (currentMs - _lastHardwareToggleTimeMs >= MinHardwareToggleIntervalMs)
+                    if (isActivelyPlaying || (currentMs - _lastHardwareToggleTimeMs >= MinHardwareToggleIntervalMs))
                     {
                         hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
                         if (hardwareResult != null)
@@ -962,7 +966,7 @@ namespace osu_TipToogle
                 switch (_currentAppliedCategory)
                 {
                     case DisplayCategory.Playing:
-                        gameStateText = $"{clientPrefix}Gameplay in beatmap";
+                        gameStateText = $"{clientPrefix}Playing a beatmap";
                         dotColor = Color.FromRgb(236, 72, 153);
                         break;
                     case DisplayCategory.SkipIntro:
