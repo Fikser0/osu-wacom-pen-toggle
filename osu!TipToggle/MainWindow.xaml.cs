@@ -408,7 +408,7 @@ namespace osu_TipToggle
             GetCursorPos(out POINT pt);
 
             IntPtr hMenu = CreatePopupMenu();
-            AppendMenu(hMenu, MF_STRING, 1, "Open");
+            AppendMenu(hMenu, MF_STRING, 1, "Open on github.com");
             AppendMenu(hMenu, MF_SEPARATOR, 0, string.Empty);
             AppendMenu(hMenu, MF_STRING, 2, "Exit");
 
@@ -419,7 +419,7 @@ namespace osu_TipToggle
 
             if (cmd == 1)
             {
-                RestoreFromTray();
+                OpenGithubReleases();
             }
             else if (cmd == 2)
             {
@@ -436,6 +436,32 @@ namespace osu_TipToggle
 
         private void BtnMinimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
         private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
+        private void BtnGithub_Click(object sender, RoutedEventArgs e) => OpenGithubReleases();
+
+        private void BtnGithub_MouseEnter(object sender, MouseEventArgs e)
+        {
+            TxtLog.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0.0, TimeSpan.FromMilliseconds(180)));
+            TxtGithubHint.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(180)));
+        }
+
+        private void BtnGithub_MouseLeave(object sender, MouseEventArgs e)
+        {
+            TxtLog.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(180)));
+            TxtGithubHint.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0.0, TimeSpan.FromMilliseconds(180)));
+        }
+
+        private static void OpenGithubReleases()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://github.com/lukecupr/osu-wacom-pen-toggle",
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
