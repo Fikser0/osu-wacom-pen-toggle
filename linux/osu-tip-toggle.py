@@ -98,10 +98,13 @@ class TabletController:
                 # Copy configs
                 write_buf[4] = buf[4]
                 write_buf[5] = buf[5]
-                # Tip flag
+                # Tip/Pressure flag (0 = disabled, 1 = enabled)
                 write_buf[6] = 1 if enable else 0
-                # Motion sync
-                write_buf[7] = buf[7]
+                
+                # Motion sync logic identical to C# SetPressureAndButtons
+                motion_sync_supported = (buf[7] & 4) != 0
+                write_buf[7] = buf[8] if motion_sync_supported else 0
+                write_buf[8] = 0
                 
                 fcntl.ioctl(fd, HIDIOCSFEATURE, write_buf)
                 success = True
