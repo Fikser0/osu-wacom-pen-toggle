@@ -323,11 +323,33 @@ async def main(args):
     if args.install_udev:
         install_udev()
 
+    import subprocess
+    import time
+    
+    otd_was_active = False
+    try:
+        res = subprocess.run(["systemctl", "--user", "is-active", "opentabletdriver.service"], capture_output=True, text=True)
+        if res.stdout.strip() == "active":
+            print("[Daemon] Temporarily stopping OpenTabletDriver to claim device...")
+            subprocess.run(["systemctl", "--user", "stop", "opentabletdriver.service"])
+            time.sleep(1.5) # Give udev time to recreate /dev/hidraw nodes
+            otd_was_active = True
+    except Exception:
+        pass
+
     tablet = TabletController()
     if not tablet.open_device():
         print("Warning: Could not find supported Wacom tablet with shavit's firmware.")
         print("Make sure you have permissions (e.g. udev rules) to read/write /dev/hidraw*")
         print("Try running: sudo ./osu-tip-toggle.py --install-udev")
+    
+    if otd_was_active:
+        print("[Daemon] Restarting OpenTabletDriver...")
+        try:
+            subprocess.run(["systemctl", "--user", "start", "opentabletdriver.service"])
+        except Exception:
+            pass
+
     
     tablet.set_tip_enabled(True)
     
