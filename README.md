@@ -1,52 +1,67 @@
 # osu! Wacom Pen Tip Auto-Toggle
 
-This tool fixes input inconsistencies of 1000hz custom firmware flashed Wacom Tablets
-
-By automatically **disabling your pen tip and buttons while playing a map**, then **instantly turning them back on** the moment you pause, fail, or return to the menu so you can navigate normally.
+Automatically toggles the "Pressure & Buttons" setting on Wacom tablets running shavit's 1000 Hz firmware based on osu! game state.
 
 <img width="1890" height="540" alt="wacom-comparison" src="https://github.com/user-attachments/assets/b284fec9-d390-4a68-8d35-683f6f5a51f2" />
 
+*Input consistency test on CTH-480 at 1000 Hz. Disabling the tip eliminates dropped packets / gaps.*
 
-> **Requirement:** You need a supported Wacom tablet running [shavit's custom firmware](https://files.shav.it/osu/tablet/).
-- **osu! (stable)** - **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus.
-- **osu! (lazer)** - **Basic Support** | Only detects whether you are playing a beatmap or are in the menu / song select.
+## The Problem
 
-**Tested on:** CTH-480, CTL-472, CTL-490, CTL-4100<br>
-**Platform:** Windows 10/11, requires NET 4.8
+On Wacom tablets running shavit's 1000 Hz custom firmware, reading pen pressure and button state can overwhelm the microcontroller, resulting in dropped reports (visible tracking gaps).
 
----
+Disabling **Pressure & Buttons** in the firmware resolves these packet drops, but leaves the pen unable to click menus, select songs, or skip map intros.
 
-## Credits
-- **[shavit](https://github.com/shavitush)** — For creating custom 1000 hz Wacom firmwares with togglable Volatile memory settings.
-- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)** allowing this app to detect osu! gameplay states.
-
----
-
-## Why use this?
-Disabling the pen tip and buttons eliminates hardware-level input inconsistencies which is a thing yet to be fixed in custom firmwares.
-
-**This tool fixes that completely:**
-- **In Gameplay:** Pen tip and buttons are disabled for more consistent inputs.
-- **In Menus & Pauses:** Re-enabled instantly so you can navigate osu! normally with your pen.
-
----
+This tool bridges that gap by reading osu! state in real time:
+- **Gameplay:** Disables pressure and buttons to maintain consistent 1000 Hz tracking.
+- **Menus, Pauses, & Intros:** Re-enables pressure and buttons so the pen functions normally.
 
 ## Features
 
-- **Pause/resume toggle:** Turns buttons back on the instant you pause, and shuts them off immediately when you resume playing.
-- **Intro & skip support:** Leaves clicks enabled during song intros so you can skip or retry until the first hit object actually appears.<br>
-  *(osu!stable only)*
-- **Runs in tray:** Minimizes to the system tray.
-- **Lightweight:** Negligible CPU usage (<1%).
-- **Hotplug support:** Automatically picks up the tablet if you reconnect it without needing to restart the app.
+- **Automatic Toggling:** Disables pressure and buttons during beatmaps and re-enables them on menus, pauses, breaks, and result screens.
+- **Intro & Outro Detection (osu!stable):** Reads beatmap files to find the first and last hit objects. Keeps clicking enabled during long intros (for skipping) and re-enables it right after the final note.
+- **Hotplug Support:** Listens to `WM_DEVICECHANGE` events to re-hook tablets when reconnected.
+- **System Tray:** Minimizes to the tray with live status tooltips.
 
----
+## Compatibility
 
-## How to Use
+### Requirements
+- **Operating System:** Windows 10 / 11 (64-bit)
+- **Runtime:** .NET Framework 4.8 *(pre-installed on Windows 10/11)*
+- **Firmware:** [shavit's custom 1000 Hz Wacom firmware](https://files.shav.it/osu/tablet/) installed on a supported tablet.
+> [!WARNING]
+> *Flashing custom firmware carries risk of bricking your tablet. Follow the instructions on shavit's website carefully.*
 
-1. Make sure your Wacom tablet has [shavit's custom firmware](https://files.shav.it/osu/tablet/) installed.
-2. Launch **osu! Wacom Pen Tip Auto-Toggle**.
-3. Start playing osu!—the app handles everything automatically in the background.
+### Tested Tablets
+| Wacom |
+| :--- |
+| CTL-480 / CTL-680 |
+| CTL-472 / CTL-672 |
+| CTL-490 |
+| CTL-4100 / CTL-6100 |
 
----
+### Client Support
+| Client | Support Level | How Behaviors Are Handled |
+| :--- | :--- | :--- |
+| **osu! (stable)** | **Full** | Song select, active play, pause screen, fails, breaks/intros, beatmap outros. |
+| **osu! (lazer)** | **Basic** | Active play vs. menus (simple window title inspection). |
 
+## How It Works
+
+1. **Detects Game State:** 
+   - **osu! (stable):** Reads in-game memory using `OsuMemoryDataProvider` to know the exact millisecond gameplay starts, pauses, or ends.
+   - **osu! (lazer):** Watches the osu! window title to detect when a beatmap is active.
+2. **Sends HID Feature Reports:**
+   - Sends HID feature reports to the tablet to change the firmware setting on the fly.
+   - Changes are written to volatile RAM only—firmware flash memory is untouched. Unplugging the tablet or closing the app restores default behavior.
+
+## Usage
+
+1. Flash your supported tablet with [shavit's custom firmware](https://files.shav.it/osu/tablet/).
+2. Download the latest `osu-TipToggle.exe` from the [Releases](https://github.com/lukecupr/osu-wacom-pen-toggle/releases) page.
+3. Launch the executable and start osu!. The tool will automatically hook the process and manage your tablet in the background.
+
+## Credits
+
+- **[shavit](https://github.com/shavitush)** — For creating the custom 1000 Hz Wacom firmware.
+- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)**.
