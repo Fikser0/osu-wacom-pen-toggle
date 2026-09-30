@@ -44,10 +44,13 @@ MODELS = [
 
 class TabletController:
     def __init__(self):
-        self.fd = -1
+        self.fds = []
         self.model = None
 
     def open_device(self):
+        found = False
+        import os
+        import fcntl
         for i in range(20):
             path = f"/dev/hidraw{i}"
             if not os.path.exists(path):
@@ -55,47 +58,50 @@ class TabletController:
             
             try:
                 fd = os.open(path, os.O_RDWR)
-                # Check model by reading HID descriptor or just try reading our feature report
                 buf = bytearray(32)
                 buf[0] = 0x24 # Report ID
                 try:
                     fcntl.ioctl(fd, HIDIOCGFEATURE, buf)
                     if buf[1:4] == b'TV':
-                        # Found shavit firmware!
-                        self.fd = fd
-                        print(f"[Wacom] Found tablet with shavit's firmware at {path}")
-                        return True
+                        self.fds.append(fd)
+                        print(f"[Wacom] Found shavit firmware interface at {path}")
+                        found = True
+                        continue
                 except OSError:
                     pass
                 os.close(fd)
             except OSError:
                 pass
-        return False
+        return found
 
     def set_tip_enabled(self, enable):
-        if self.fd < 0:
+        if not self.fds:
             return
         
-        try:
-            buf = bytearray(32)
-            buf[0] = 0x24
-            fcntl.ioctl(self.fd, HIDIOCGFEATURE, buf)
-            
-            if buf[1:4] != b'TV':
-                return
+        success = False
+        import fcntl
+        for fd in self.fds:
+            try:
+                buf = bytearray(32)
+                buf[0] = 0x24
+                fcntl.ioctl(fd, HIDIOCGFEATURE, buf)
                 
-            # offset 6 for x80, but wait, the windows app checks model. 
-            # In V1 fw, byte 1 is config base. It differs per model in windows app, 
-            # but usually it's offset 6. For simplicity, we assume offset 6.
-            # (In a real universal release, you'd map offset per PID. But this works for CTL-480).
-            offset = 6
-            buf[offset] = 1 if enable else 0
-            
-            fcntl.ioctl(self.fd, HIDIOCSFEATURE, buf)
+                if buf[1:4] != b'TV':
+                    continue
+                    
+                offset = 6
+                buf[offset] = 1 if enable else 0
+                
+                fcntl.ioctl(fd, HIDIOCSFEATURE, buf)
+                success = True
+            except OSError:
+                pass
+                
+        if success:
             state_str = "ENABLED" if enable else "DISABLED"
             print(f"[Wacom] Tip {state_str}")
-        except OSError as e:
-            print(f"[Wacom] Error setting tip: {e}")
+        else:
+            print(f"[Wacom] Error setting tip on all interfaces")
 
 class LogTailer:
     def __init__(self, tablet_ctrl):
