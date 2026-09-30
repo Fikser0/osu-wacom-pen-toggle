@@ -4,8 +4,12 @@ using OsuMemoryDataProvider;
 using OsuMemoryDataProvider.OsuMemoryModels;
 using OsuMemoryDataProvider.OsuMemoryModels.Direct;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using Math = System.Math;
+using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -25,6 +29,7 @@ namespace osu_TipToggle
         private readonly StructuredOsuMemoryReader _reader;
         private OsuBaseAddresses _baseAddresses;
         private CancellationTokenSource? _cts;
+        private Task? _monitorTask;
         private EventWaitHandle? _restoreWaitHandle;
 
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
@@ -52,9 +57,9 @@ namespace osu_TipToggle
         private long _lastLazerScanMs = 0;
 
         private const int MinHardwareToggleIntervalMs = 1000;
+        private const int HardwareSearchRetryIntervalMs = 15000;
         private long _lastHardwareToggleTimeMs = 0;
         private bool? _pendingHardwareState = null;
-        private long _pendingHardwareStateStartTime = 0;
 
         // UI transition smoothing
         private enum DisplayCategory
@@ -118,6 +123,12 @@ namespace osu_TipToggle
 
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpData);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        private static extern uint ExtractIconEx(string? szFileName, int nIconIndex, out IntPtr phiconLarge, out IntPtr phiconSmall, uint nIcons);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool DestroyIcon(IntPtr hIcon);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
@@ -192,6 +203,7 @@ namespace osu_TipToggle
         private const uint MF_SEPARATOR = 0x00000800;
 
         private bool _isTrayIconActive = false;
+        private IntPtr _hTrayIcon = IntPtr.Zero;
 
         #endregion
 
@@ -199,12 +211,29 @@ namespace osu_TipToggle
         {
             InitializeComponent();
 
+            string appVersion = GetAppVersion();
+            Title = $"osu!TipToggle v{appVersion}";
+            TxtVersion.Text = $"v{appVersion}";
+
             _reader = StructuredOsuMemoryReader.Instance;
             _baseAddresses = new OsuBaseAddresses();
 
             SourceInitialized += MainWindow_SourceInitialized;
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
+        }
+
+        private static string GetAppVersion()
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            string? infoVer = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrEmpty(infoVer))
+            {
+                return infoVer!.Split('+')[0];
+            }
+
+            var ver = asm.GetName().Version;
+            return ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "0.1.0";
         }
 
         private void MainWindow_SourceInitialized(object? sender, EventArgs e)
@@ -244,7 +273,7 @@ namespace osu_TipToggle
             _lastUiTabletInfo = "";
         }
 
-        private string GetCurrentTipStatusText()
+        private string GetHardwareSummaryText()
         {
             if (WacomDevice.LastDetectedModel.IndexOf("Not Found", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 _lastHardwareResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -273,7 +302,7 @@ namespace osu_TipToggle
             nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
             nid.uCallbackMessage = WM_TRAYICON;
             nid.hIcon = GetTrayIconHandle();
-            nid.szTip = $"osu! Pen Tip Auto-Toggle\n{GetCurrentTipStatusText()}";
+            nid.szTip = GetHardwareSummaryText();
 
             Shell_NotifyIcon(NIM_ADD, ref nid);
             _isTrayIconActive = true;
@@ -289,7 +318,7 @@ namespace osu_TipToggle
             nid.hWnd = hWnd;
             nid.uID = 1;
             nid.uFlags = NIF_TIP;
-            nid.szTip = $"osu! Pen Tip Auto-Toggle\n{GetCurrentTipStatusText()}";
+            nid.szTip = GetHardwareSummaryText();
 
             Shell_NotifyIcon(NIM_MODIFY, ref nid);
         }
@@ -306,17 +335,43 @@ namespace osu_TipToggle
 
             Shell_NotifyIcon(NIM_DELETE, ref nid);
             _isTrayIconActive = false;
+
+            if (_hTrayIcon != IntPtr.Zero)
+            {
+                DestroyIcon(_hTrayIcon);
+                _hTrayIcon = IntPtr.Zero;
+            }
         }
 
         private IntPtr GetTrayIconHandle()
         {
+            if (_hTrayIcon != IntPtr.Zero)
+                return _hTrayIcon;
+
+            try
+            {
+                string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+                {
+                    uint count = ExtractIconEx(exePath, 0, out IntPtr hLarge, out IntPtr hSmall, 1);
+                    if (hLarge != IntPtr.Zero) DestroyIcon(hLarge);
+                    if (hSmall != IntPtr.Zero)
+                    {
+                        _hTrayIcon = hSmall;
+                        return _hTrayIcon;
+                    }
+                }
+            }
+            catch { }
+
             IntPtr hWnd = new WindowInteropHelper(this).Handle;
             IntPtr hIcon = SendMessage(hWnd, WM_GETICON, IntPtr.Zero, IntPtr.Zero);
-            if (hIcon == IntPtr.Zero)
+            if (hIcon != IntPtr.Zero)
             {
-                hIcon = LoadIcon(IntPtr.Zero, IDI_APPLICATION);
+                return hIcon;
             }
-            return hIcon;
+
+            return LoadIcon(IntPtr.Zero, IDI_APPLICATION);
         }
 
         private IntPtr HwndMessageHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -393,7 +448,7 @@ namespace osu_TipToggle
             }
             catch { }
 
-            Task.Run(new Func<Task>(() => MonitorLoop(_cts.Token)));
+            _monitorTask = Task.Run(() => MonitorLoop(_cts.Token));
         }
 
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -401,6 +456,12 @@ namespace osu_TipToggle
             _cts?.Cancel();
             _restoreWaitHandle?.Dispose();
             RemoveTrayIcon();
+
+            try
+            {
+                _monitorTask?.Wait(500);
+            }
+            catch { }
 
             WacomDevice.SetPressureAndButtons(true);
         }
@@ -612,14 +673,6 @@ namespace osu_TipToggle
             _firstHitObjectTime = 0;
             _lastHitObjectTime = 0;
             _unknownStatusStartMs = 0;
-
-            try
-            {
-                var clearMethod = _reader.GetType().GetMethod("InvalidateCaches")
-                               ?? _reader.GetType().GetMethod("ClearCaches");
-                clearMethod?.Invoke(_reader, null);
-            }
-            catch { }
         }
 
         #endregion
@@ -668,277 +721,281 @@ namespace osu_TipToggle
 
         private async Task MonitorLoop(CancellationToken token)
         {
-            bool lastReadGeneral = false;
-
-            while (!token.IsCancellationRequested)
+            try
             {
-                long now = _stopwatch.ElapsedMilliseconds;
-                int currentStablePid = GetStableOsuProcessId(lastReadGeneral);
+                bool lastReadGeneral = false;
 
-                if (currentStablePid != _lastStablePid)
+                while (!token.IsCancellationRequested)
                 {
-                    _lastStablePid = currentStablePid;
-                    _consecutiveFailedReads = 0;
-                    ForceRehook(now);
-                }
-
-                bool readGeneral = false;
-                bool readBeatmap = false;
-
-                if (currentStablePid > 0)
-                {
-                    readGeneral = _reader.TryRead(_baseAddresses.GeneralData);
-                    if (readGeneral)
+                    try
                     {
-                        readBeatmap = _reader.TryRead(_baseAddresses.Beatmap);
-                        if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId && _baseAddresses.Beatmap.Id > 0)
+                        long now = _stopwatch.ElapsedMilliseconds;
+                        int currentStablePid = GetStableOsuProcessId(lastReadGeneral);
+
+                        if (currentStablePid != _lastStablePid)
                         {
-                            _lastMapId = _baseAddresses.Beatmap.Id;
-                            (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
-                        }
-                    }
-                }
-                lastReadGeneral = readGeneral;
-
-                DisplayCategory candidateCategory;
-                bool isLazerCandidate = false;
-                bool isOutro = false;
-                string audioTimeText = "";
-                string menuStatusDetail = "";
-
-                if (readGeneral)
-                {
-                    _consecutiveFailedReads = 0;
-                    isLazerCandidate = false;
-                    var status = _baseAddresses.GeneralData.OsuStatus;
-                    int audioTime = _baseAddresses.GeneralData.AudioTime;
-
-                    if (status == OsuMemoryStatus.Unknown)
-                    {
-                        if (_unknownStatusStartMs == 0) _unknownStatusStartMs = now;
-                        else if (now - _unknownStatusStartMs > 3000 && now - _lastRehookMs > 3000)
-                        {
+                            _lastStablePid = currentStablePid;
+                            _consecutiveFailedReads = 0;
                             ForceRehook(now);
                         }
-                    }
-                    else
-                    {
-                        _unknownStatusStartMs = 0;
-                    }
 
-                    if (status == OsuMemoryStatus.Playing && audioTime == 0 && _lastAudioTime < -50)
-                    {
-                        audioTime = _lastAudioTime;
-                    }
+                        bool readGeneral = false;
+                        bool readBeatmap = false;
 
-                    bool isInitialAttachToPlaying = (_lastOsuStatus == OsuMemoryStatus.Unknown && status == OsuMemoryStatus.Playing);
-
-                    bool isMapRestart = (status == OsuMemoryStatus.Playing) &&
-                                        (!isInitialAttachToPlaying && _lastOsuStatus != OsuMemoryStatus.Playing ||
-                                         (_hasAudioStarted && (audioTime < (_lastAudioTime - 500) || (_lastAudioTime > 0 && audioTime <= 0))));
-
-                    if (isInitialAttachToPlaying)
-                    {
-                        _hasAudioStarted = true;
-                        _gameplayEnterMs = now - 5000;
-                        _lastAudioTime = audioTime;
-                    }
-                    else if (isMapRestart)
-                    {
-                        _gameplayEnterMs = now;
-                        _frozenTicks = 0;
-                        _hasAudioStarted = false;
-                        _lastAudioTime = audioTime;
-                    }
-                    _lastOsuStatus = status;
-
-                    if (status == OsuMemoryStatus.Playing)
-                    {
-                        if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId)
+                        if (currentStablePid > 0)
                         {
-                            _lastMapId = _baseAddresses.Beatmap.Id;
-                            (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
-                        }
-
-                        long elapsedFromEnter = now - _gameplayEnterMs;
-
-                        if (!_hasAudioStarted && _lastAudioTime != -1 && audioTime > _lastAudioTime)
-                        {
-                            _hasAudioStarted = true;
-                        }
-
-                        if (!_hasAudioStarted && elapsedFromEnter < 600)
-                        {
-                            audioTimeText = "Song timeline: Loading...";
-                        }
-                        else
-                        {
-                            audioTimeText = FormatAudioTime(audioTime);
-                        }
-
-                        if (!_hasAudioStarted)
-                        {
-                            _frozenTicks = 0;
-                        }
-                        else if (audioTime == _lastAudioTime)
-                        {
-                            _frozenTicks++;
-                        }
-                        else
-                        {
-                            _frozenTicks = 0;
-                        }
-                        _lastAudioTime = audioTime;
-
-                        bool isUnknownDuringLoad = (_firstHitObjectTime <= 0 && elapsedFromEnter < 500);
-                        bool isLongIntro = _firstHitObjectTime >= 3000 && (!_hasAudioStarted || audioTime < (_firstHitObjectTime - 1000));
-                        bool isIntro = isLongIntro || isUnknownDuringLoad;
-
-                        isOutro = _hasAudioStarted && (_lastHitObjectTime > 0 && audioTime > (_lastHitObjectTime + LastNoteDelayMs));
-
-                        if (_frozenTicks >= 8)
-                        {
-                            candidateCategory = DisplayCategory.Paused;
-                        }
-                        else if (isIntro)
-                        {
-                            candidateCategory = DisplayCategory.SkipIntro;
-                        }
-                        else
-                        {
-                            candidateCategory = DisplayCategory.Playing;
-                        }
-                    }
-                    else
-                    {
-                        _frozenTicks = 0;
-                        _hasAudioStarted = false;
-                        menuStatusDetail = FormatMenuStatus(status);
-                        audioTimeText = FormatAudioTime(audioTime);
-                        candidateCategory = DisplayCategory.Menu;
-                    }
-                }
-                else if (currentStablePid > 0)
-                {
-                    _consecutiveFailedReads++;
-                    _frozenTicks = 0;
-                    _lastMapId = -1;
-                    _firstHitObjectTime = 0;
-                    _lastHitObjectTime = 0;
-                    _lastOsuStatus = OsuMemoryStatus.Unknown;
-                    _unknownStatusStartMs = 0;
-                    isLazerCandidate = false;
-
-                    if (now - _lastRehookMs >= 1200)
-                    {
-                        ForceRehook(now);
-                    }
-
-                    if (_consecutiveFailedReads > 20)
-                    {
-                        audioTimeText = "Try to \"Run as Admin\" if stuck";
-                        menuStatusDetail = "Re-hooking...";
-                    }
-                    else
-                    {
-                        audioTimeText = "Connecting";
-                        menuStatusDetail = "Hooking memory...";
-                    }
-
-                    candidateCategory = DisplayCategory.Connecting;
-                }
-                else
-                {
-                    _frozenTicks = 0;
-                    _lastMapId = -1;
-                    _firstHitObjectTime = 0;
-                    _lastHitObjectTime = 0;
-                    _lastOsuStatus = OsuMemoryStatus.Unknown;
-                    _unknownStatusStartMs = 0;
-                    _consecutiveFailedReads = 0;
-
-                    string? lazerTitle = GetLazerWindowTitle();
-                    if (lazerTitle != null)
-                    {
-                        isLazerCandidate = true;
-                        bool hasBeatmapName = lazerTitle.Contains(" - ") || lazerTitle.Contains(" – ");
-                        if (hasBeatmapName)
-                        {
-                            candidateCategory = DisplayCategory.Playing;
-                            audioTimeText = $"Song: {lazerTitle}";
-                        }
-                        else
-                        {
-                            candidateCategory = DisplayCategory.Menu;
-                            menuStatusDetail = "In menus";
-                            audioTimeText = "Waiting for gameplay";
-                        }
-                    }
-                    else
-                    {
-                        candidateCategory = DisplayCategory.Waiting;
-                        audioTimeText = "See you next time...";
-                    }
-                }
-
-                // Hardware rate-limited toggling (prevents MCU / digitizer desync at 1000Hz)
-                bool isActivelyPlaying = (candidateCategory == DisplayCategory.Playing) && !isOutro;
-                string? hardwareResult = null;
-                long currentMs = _stopwatch.ElapsedMilliseconds;
-
-                bool isHwUnavailable = (_lastHardwareResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                        _lastHardwareResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                if (isHwUnavailable && currentMs - _lastDeviceSearchMs > 2000)
-                {
-                    _lastDeviceSearchMs = currentMs;
-                    _lastTargetState = null;
-                    _lastHardwareToggleTimeMs = 0;
-                }
-
-                if (_lastTargetState == null)
-                {
-                    _pendingHardwareState = isActivelyPlaying;
-                    hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
-                    if (hardwareResult != null)
-                    {
-                        _lastHardwareResult = hardwareResult;
-                        if (!hardwareResult.StartsWith("ERR") && !hardwareResult.Contains("not found"))
-                        {
-                            _lastTargetState = isActivelyPlaying;
-                            _lastHardwareToggleTimeMs = currentMs;
-                        }
-                    }
-                }
-                else if (isActivelyPlaying != _lastTargetState)
-                {
-                    if (_pendingHardwareState != isActivelyPlaying)
-                    {
-                        _pendingHardwareState = isActivelyPlaying;
-                        _pendingHardwareStateStartTime = currentMs;
-                    }
-
-                    if (currentMs - _lastHardwareToggleTimeMs >= MinHardwareToggleIntervalMs)
-                    {
-                        hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
-                        if (hardwareResult != null)
-                        {
-                            _lastHardwareResult = hardwareResult;
-                            if (!hardwareResult.StartsWith("ERR") && !hardwareResult.Contains("not found"))
+                            readGeneral = _reader.TryRead(_baseAddresses.GeneralData);
+                            if (readGeneral)
                             {
-                                _lastTargetState = isActivelyPlaying;
-                                _lastHardwareToggleTimeMs = currentMs;
+                                readBeatmap = _reader.TryRead(_baseAddresses.Beatmap);
+                                if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId && _baseAddresses.Beatmap.Id > 0)
+                                {
+                                    _lastMapId = _baseAddresses.Beatmap.Id;
+                                    (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
+                                }
                             }
                         }
-                    }
-                }
-                else
-                {
-                    _pendingHardwareState = isActivelyPlaying;
-                }
+                        lastReadGeneral = readGeneral;
 
-                // UI status update debounce
-                bool isPauseResumeUiTransition =
+                        DisplayCategory candidateCategory;
+                        bool isLazerCandidate = false;
+                        bool isOutro = false;
+                        string audioTimeText = "";
+                        string menuStatusDetail = "";
+
+                        if (readGeneral)
+                        {
+                            _consecutiveFailedReads = 0;
+                            isLazerCandidate = false;
+                            var status = _baseAddresses.GeneralData.OsuStatus;
+                            int audioTime = _baseAddresses.GeneralData.AudioTime;
+
+                            if (status == OsuMemoryStatus.Unknown)
+                            {
+                                if (_unknownStatusStartMs == 0) _unknownStatusStartMs = now;
+                                else if (now - _unknownStatusStartMs > 3000 && now - _lastRehookMs > 3000)
+                                {
+                                    ForceRehook(now);
+                                }
+                            }
+                            else
+                            {
+                                _unknownStatusStartMs = 0;
+                            }
+
+                            if (status == OsuMemoryStatus.Playing && audioTime == 0 && _lastAudioTime < -50)
+                            {
+                                audioTime = _lastAudioTime;
+                            }
+
+                            bool isInitialAttachToPlaying = (_lastOsuStatus == OsuMemoryStatus.Unknown && status == OsuMemoryStatus.Playing);
+
+                            bool isMapRestart = (status == OsuMemoryStatus.Playing) &&
+                                                (!isInitialAttachToPlaying && _lastOsuStatus != OsuMemoryStatus.Playing ||
+                                                 (_hasAudioStarted && (audioTime < (_lastAudioTime - 500) || (_lastAudioTime > 0 && audioTime <= 0))));
+
+                            if (isInitialAttachToPlaying)
+                            {
+                                _hasAudioStarted = true;
+                                _gameplayEnterMs = now - 5000;
+                                _lastAudioTime = audioTime;
+                            }
+                            else if (isMapRestart)
+                            {
+                                _gameplayEnterMs = now;
+                                _frozenTicks = 0;
+                                _hasAudioStarted = false;
+                                _lastAudioTime = audioTime;
+                            }
+                            _lastOsuStatus = status;
+
+                            if (status == OsuMemoryStatus.Playing)
+                            {
+                                if (readBeatmap && _baseAddresses.Beatmap.Id != _lastMapId)
+                                {
+                                    _lastMapId = _baseAddresses.Beatmap.Id;
+                                    (_firstHitObjectTime, _lastHitObjectTime) = ResolveHitObjectTimes(_baseAddresses.Beatmap, currentStablePid);
+                                }
+
+                                long elapsedFromEnter = now - _gameplayEnterMs;
+
+                                if (!_hasAudioStarted && _lastAudioTime != -1 && audioTime > _lastAudioTime)
+                                {
+                                    _hasAudioStarted = true;
+                                }
+
+                                if (!_hasAudioStarted && elapsedFromEnter < 600)
+                                {
+                                    audioTimeText = "Song timeline: Loading...";
+                                }
+                                else
+                                {
+                                    audioTimeText = FormatAudioTime(audioTime);
+                                }
+
+                                if (!_hasAudioStarted)
+                                {
+                                    _frozenTicks = 0;
+                                }
+                                else if (audioTime == _lastAudioTime)
+                                {
+                                    _frozenTicks++;
+                                }
+                                else
+                                {
+                                    _frozenTicks = 0;
+                                }
+                                _lastAudioTime = audioTime;
+
+                                bool isUnknownDuringLoad = (_firstHitObjectTime <= 0 && elapsedFromEnter < 500);
+                                bool isLongIntro = _firstHitObjectTime >= 3000 && (!_hasAudioStarted || audioTime < (_firstHitObjectTime - 1000));
+                                bool isIntro = isLongIntro || isUnknownDuringLoad;
+
+                                isOutro = _hasAudioStarted && (_lastHitObjectTime > 0 && audioTime > (_lastHitObjectTime + LastNoteDelayMs));
+
+                                if (_frozenTicks >= 8)
+                                {
+                                    candidateCategory = DisplayCategory.Paused;
+                                }
+                                else if (isIntro)
+                                {
+                                    candidateCategory = DisplayCategory.SkipIntro;
+                                }
+                                else
+                                {
+                                    candidateCategory = DisplayCategory.Playing;
+                                }
+                            }
+                            else
+                            {
+                                _frozenTicks = 0;
+                                _hasAudioStarted = false;
+                                menuStatusDetail = FormatMenuStatus(status);
+                                audioTimeText = FormatAudioTime(audioTime);
+                                candidateCategory = DisplayCategory.Menu;
+                            }
+                        }
+                        else if (currentStablePid > 0)
+                        {
+                            _consecutiveFailedReads++;
+                            _frozenTicks = 0;
+                            _lastMapId = -1;
+                            _firstHitObjectTime = 0;
+                            _lastHitObjectTime = 0;
+                            _lastOsuStatus = OsuMemoryStatus.Unknown;
+                            _unknownStatusStartMs = 0;
+                            isLazerCandidate = false;
+
+                            if (now - _lastRehookMs >= 1200)
+                            {
+                                ForceRehook(now);
+                            }
+
+                            if (_consecutiveFailedReads > 20)
+                            {
+                                audioTimeText = "Try to \"Run as Admin\" if stuck";
+                                menuStatusDetail = "Re-hooking...";
+                            }
+                            else
+                            {
+                                audioTimeText = "Connecting";
+                                menuStatusDetail = "Hooking memory...";
+                            }
+
+                            candidateCategory = DisplayCategory.Connecting;
+                        }
+                        else
+                        {
+                            _frozenTicks = 0;
+                            _lastMapId = -1;
+                            _firstHitObjectTime = 0;
+                            _lastHitObjectTime = 0;
+                            _lastOsuStatus = OsuMemoryStatus.Unknown;
+                            _unknownStatusStartMs = 0;
+                            _consecutiveFailedReads = 0;
+
+                            string? lazerTitle = GetLazerWindowTitle();
+                            if (lazerTitle != null)
+                            {
+                                isLazerCandidate = true;
+                                bool hasBeatmapName = lazerTitle.Contains(" - ") || lazerTitle.Contains(" – ");
+                                if (hasBeatmapName)
+                                {
+                                    candidateCategory = DisplayCategory.Playing;
+                                    audioTimeText = $"Song: {lazerTitle}";
+                                }
+                                else
+                                {
+                                    candidateCategory = DisplayCategory.Menu;
+                                    menuStatusDetail = "In menus";
+                                    audioTimeText = "Waiting for gameplay";
+                                }
+                            }
+                            else
+                            {
+                                candidateCategory = DisplayCategory.Waiting;
+                                audioTimeText = "See you next time...";
+                            }
+                        }
+
+                        // Hardware rate-limited toggling (prevents MCU / digitizer desync at 1000Hz)
+                        bool isActivelyPlaying = (candidateCategory == DisplayCategory.Playing) && !isOutro;
+                        string? hardwareResult = null;
+                        long currentMs = _stopwatch.ElapsedMilliseconds;
+
+                        bool isHwUnavailable = (_lastHardwareResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                _lastHardwareResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                        if (isHwUnavailable && (currentMs - _lastDeviceSearchMs > HardwareSearchRetryIntervalMs))
+                        {
+                            _lastDeviceSearchMs = currentMs;
+                            _lastTargetState = null;
+                            _lastHardwareToggleTimeMs = 0;
+                        }
+
+                        if (token.IsCancellationRequested) break;
+
+                        if (_lastTargetState == null)
+                        {
+                            _pendingHardwareState = isActivelyPlaying;
+                            hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
+                            if (hardwareResult != null)
+                            {
+                                _lastHardwareResult = hardwareResult;
+                                bool isSuccess = hardwareResult == "Active (ON)" || hardwareResult == "Disabled (OFF)";
+                                if (isSuccess)
+                                {
+                                    _lastTargetState = isActivelyPlaying;
+                                    _lastHardwareToggleTimeMs = currentMs;
+                                }
+                            }
+                        }
+                        else if (isActivelyPlaying != _lastTargetState)
+                        {
+                            _pendingHardwareState = isActivelyPlaying;
+
+                            if (currentMs - _lastHardwareToggleTimeMs >= MinHardwareToggleIntervalMs)
+                            {
+                                hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
+                                if (hardwareResult != null)
+                                {
+                                    _lastHardwareResult = hardwareResult;
+                                    bool isSuccess = hardwareResult == "Active (ON)" || hardwareResult == "Disabled (OFF)";
+                                    if (isSuccess)
+                                    {
+                                        _lastTargetState = isActivelyPlaying;
+                                        _lastHardwareToggleTimeMs = currentMs;
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            _pendingHardwareState = isActivelyPlaying;
+                        }
+
+                        // UI status update debounce
+                        bool isPauseResumeUiTransition =
                     (candidateCategory == DisplayCategory.Paused && _currentAppliedCategory == DisplayCategory.Playing) ||
                     (candidateCategory == DisplayCategory.Playing && _currentAppliedCategory == DisplayCategory.Paused);
 
@@ -1044,7 +1101,12 @@ namespace osu_TipToggle
                         if (isWindowVisible)
                         {
                             if (shouldUpdateAudio) TxtAudioTime.Text = capturedAudio;
-                            if (shouldUpdateTablet) TxtDetectedTablet.Text = $"Device: {capturedTablet}";
+                            if (shouldUpdateTablet)
+                            {
+                                TxtDetectedTablet.Text = capturedTablet.Equals("Not Found", StringComparison.OrdinalIgnoreCase)
+                                    ? "Connect device"
+                                    : $"Device: {capturedTablet}";
+                            }
                         }
 
                         if (capturedHwResult != null)
@@ -1076,9 +1138,80 @@ namespace osu_TipToggle
                     }));
                 }
 
-                int pollDelay = (readGeneral || currentStablePid > 0 || _cachedLazerHwnd != IntPtr.Zero) ? 25 : 200;
-                await Task.Delay(pollDelay, token);
+                        int pollDelay = (readGeneral || currentStablePid > 0 || _cachedLazerHwnd != IntPtr.Zero) ? 25 : 200;
+                        await Task.Delay(pollDelay, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[MonitorLoop] Loop error: {ex.Message}");
+                        await Task.Delay(250, token);
+                    }
+                }
             }
+            finally
+            {
+                try
+                {
+                    WacomDevice.SetPressureAndButtons(true);
+                }
+                catch { }
+            }
+        }
+
+        private struct TimingPoint
+        {
+            public double Time;
+            public double BeatLength;
+            public bool Uninherited;
+        }
+
+        private static string ResolveSongsFolder(string? osuFolder)
+        {
+            if (string.IsNullOrEmpty(osuFolder) || !Directory.Exists(osuFolder))
+                return string.Empty;
+
+            try
+            {
+                var cfgFiles = Directory.GetFiles(osuFolder, "osu!*.cfg");
+                foreach (var cfgFile in cfgFiles)
+                {
+                    string fileName = Path.GetFileName(cfgFile);
+                    if (!fileName.StartsWith("osu!.", StringComparison.OrdinalIgnoreCase) &&
+                        !fileName.Equals("osu!.cfg", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    foreach (var line in File.ReadLines(cfgFile))
+                    {
+                        string trimmed = line.Trim();
+                        if (trimmed.StartsWith("BeatmapDirectory", StringComparison.OrdinalIgnoreCase))
+                        {
+                            int eqIdx = trimmed.IndexOf('=');
+                            if (eqIdx >= 0 && eqIdx < trimmed.Length - 1)
+                            {
+                                string customDir = trimmed.Substring(eqIdx + 1).Trim();
+                                if (!string.IsNullOrEmpty(customDir))
+                                {
+                                    string resolved = Path.IsPathRooted(customDir)
+                                        ? customDir
+                                        : Path.Combine(osuFolder, customDir);
+
+                                    if (Directory.Exists(resolved))
+                                    {
+                                        return resolved;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return Path.Combine(osuFolder, "Songs");
         }
 
         private (int firstTime, int lastTime) ResolveHitObjectTimes(CurrentBeatmap beatmap, int stablePid)
@@ -1108,20 +1241,48 @@ namespace osu_TipToggle
                     osuFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu!");
                 }
 
-                string mapPath = Path.Combine(osuFolder, "Songs", beatmap.FolderName, beatmap.OsuFileName);
+                string songsFolder = ResolveSongsFolder(osuFolder);
+                if (string.IsNullOrEmpty(songsFolder))
+                {
+                    songsFolder = Path.Combine(osuFolder, "Songs");
+                }
+                string mapPath = Path.Combine(songsFolder, beatmap.FolderName, beatmap.OsuFileName);
 
                 if (!File.Exists(mapPath))
                 {
-                    string fallbackPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu!", "Songs", beatmap.FolderName, beatmap.OsuFileName);
-                    if (File.Exists(fallbackPath)) mapPath = fallbackPath;
-                    else return (0, 0);
+                    string defaultSongs = Path.Combine(osuFolder, "Songs", beatmap.FolderName, beatmap.OsuFileName);
+                    if (File.Exists(defaultSongs))
+                    {
+                        mapPath = defaultSongs;
+                    }
+                    else
+                    {
+                        string localAppDataSongs = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                            "osu!", "Songs", beatmap.FolderName, beatmap.OsuFileName);
+
+                        if (File.Exists(localAppDataSongs))
+                        {
+                            mapPath = localAppDataSongs;
+                        }
+                        else
+                        {
+                            return (0, 0);
+                        }
+                    }
                 }
 
                 using var fs = new FileStream(mapPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using var sr = new StreamReader(fs, Encoding.UTF8);
 
                 bool inGeneral = false;
+                bool inDifficulty = false;
+                bool inTimingPoints = false;
                 bool inHitObjects = false;
+
+                double sliderMultiplier = 1.4;
+                var timingPoints = new List<TimingPoint>();
+
                 int firstHitObjectTime = 0;
                 int lastHitObjectTime = 0;
                 string? line;
@@ -1129,22 +1290,15 @@ namespace osu_TipToggle
                 while ((line = sr.ReadLine()) != null)
                 {
                     string trimmed = line.Trim();
-                    if (trimmed == "[General]")
-                    {
-                        inGeneral = true;
-                        inHitObjects = false;
+                    if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("//"))
                         continue;
-                    }
-                    if (trimmed == "[HitObjects]")
-                    {
-                        inGeneral = false;
-                        inHitObjects = true;
-                        continue;
-                    }
+
                     if (trimmed.StartsWith("["))
                     {
-                        inGeneral = false;
-                        inHitObjects = false;
+                        inGeneral = (trimmed == "[General]");
+                        inDifficulty = (trimmed == "[Difficulty]");
+                        inTimingPoints = (trimmed == "[TimingPoints]");
+                        inHitObjects = (trimmed == "[HitObjects]");
                         continue;
                     }
 
@@ -1158,9 +1312,32 @@ namespace osu_TipToggle
                         }
                     }
 
-                    if (inHitObjects && !string.IsNullOrWhiteSpace(line))
+                    if (inDifficulty && trimmed.StartsWith("SliderMultiplier:", StringComparison.OrdinalIgnoreCase))
                     {
-                        var parts = line.Split(',');
+                        string smVal = trimmed.Substring(17).Trim();
+                        double.TryParse(smVal, NumberStyles.Float, CultureInfo.InvariantCulture, out sliderMultiplier);
+                    }
+
+                    if (inTimingPoints)
+                    {
+                        var tpParts = trimmed.Split(',');
+                        if (tpParts.Length >= 2 &&
+                            double.TryParse(tpParts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double tpTime) &&
+                            double.TryParse(tpParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double beatLen))
+                        {
+                            bool isUninh = (tpParts.Length > 6 && int.TryParse(tpParts[6], out int u)) ? (u == 1) : (beatLen > 0);
+                            timingPoints.Add(new TimingPoint
+                            {
+                                Time = tpTime,
+                                BeatLength = beatLen,
+                                Uninherited = isUninh
+                            });
+                        }
+                    }
+
+                    if (inHitObjects)
+                    {
+                        var parts = trimmed.Split(',');
                         if (parts.Length > 2 && int.TryParse(parts[2], out int objTime))
                         {
                             if (firstHitObjectTime == 0)
@@ -1172,10 +1349,44 @@ namespace osu_TipToggle
 
                             if (parts.Length > 3 && int.TryParse(parts[3], out int objType))
                             {
-                                // Spinner (type bit 3) ends at parts[5]
+                                // Spinner (type bit 3)
                                 if ((objType & 8) != 0 && parts.Length > 5 && int.TryParse(parts[5], out int spinnerEnd))
                                 {
                                     endTime = spinnerEnd;
+                                }
+                                // Slider (type bit 1)
+                                else if ((objType & 2) != 0 && parts.Length > 7)
+                                {
+                                    if (int.TryParse(parts[6], out int slides) &&
+                                        double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out double pixelLength))
+                                    {
+                                        double uninheritedBeatLength = 500.0;
+                                        double svMultiplier = 1.0;
+
+                                        for (int i = 0; i < timingPoints.Count; i++)
+                                        {
+                                            var tp = timingPoints[i];
+                                            if (tp.Time > objTime) break;
+
+                                            if (tp.Uninherited)
+                                            {
+                                                uninheritedBeatLength = tp.BeatLength;
+                                                svMultiplier = 1.0;
+                                            }
+                                            else
+                                            {
+                                                svMultiplier = Math.Max(0.1, Math.Min(10.0, -100.0 / tp.BeatLength));
+                                            }
+                                        }
+
+                                        double pixelsPerBeat = sliderMultiplier * 100.0 * svMultiplier;
+                                        if (pixelsPerBeat > 0)
+                                        {
+                                            double beats = (pixelLength * slides) / pixelsPerBeat;
+                                            int duration = (int)Math.Round(beats * uninheritedBeatLength);
+                                            endTime = objTime + Math.Max(0, duration);
+                                        }
+                                    }
                                 }
                             }
 
