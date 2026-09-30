@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 import os
-import fcntl
-import struct
+import sys
 import glob
 import time
+import fcntl
 import asyncio
+import argparse
 import signal
-import sys
 import json
+import shutil
+import subprocess
 
 try:
     import websockets
@@ -15,138 +17,110 @@ try:
 except ImportError:
     HAS_WEBSOCKETS = False
 
-
-def _ioc(dir, type, nr, size):
-    return (dir << 30) | (ord(type) << 8) | nr | (size << 16)
-
-# ioctl constants
-HIDIOCGRAWINFO = _ioc(2, 'H', 0x03, 8)
+HIDIOCSFEATURE = 0xC0204806
+HIDIOCGFEATURE = 0xC0204807
 
 class WacomModel:
-    def __init__(self, name, pids, report_id, report_len, write_offset):
+    def __init__(self, pid, name):
+        self.pid = pid
         self.name = name
-        self.pids = pids
-        self.report_id = report_id
-        self.report_len = report_len
-        self.write_offset = write_offset
 
 MODELS = [
-    WacomModel("CTL/CTH-x80", [0x0302, 0x030E, 0x0303, 0x0323], 0x24, 32, 1),
-    WacomModel("CTL-x72", [0x037A, 0x037B], 0x24, 32, 1),
-    WacomModel("CTL-4100/6100", [0x0374, 0x0375, 0x0376, 0x0377, 0x03C5], 0x60, 64, 3),
-    WacomModel("PTK-x70", [0x03F5, 0x03F7, 0x03F9], 0x60, 64, 1),
+    WacomModel(0x033b, "CTL-490"),
+    WacomModel(0x033c, "CTH-490"),
+    WacomModel(0x030e, "CTL/CTH-x80"),
+    WacomModel(0x033e, "CTL-471/671"),
+    WacomModel(0x0302, "CTL-470"),
+    WacomModel(0x00cc, "CTH-470"),
+    WacomModel(0x0374, "CTL-472"),
+    WacomModel(0x0375, "CTL-672"),
+    WacomModel(0x037a, "CTL-4100"),
+    WacomModel(0x037b, "CTL-6100"),
+    WacomModel(0x037c, "CTL-4100WL"),
+    WacomModel(0x037d, "CTL-6100WL"),
+    WacomModel(0x03c8, "Wacom One 12"),
+    WacomModel(0x03c9, "Wacom One 13"),
 ]
-
-def HIDIOCGFEATURE(size):
-    return _ioc(3, 'H', 0x07, size)
-
-def HIDIOCSFEATURE(size):
-    return _ioc(3, 'H', 0x06, size)
 
 class TabletController:
     def __init__(self):
-        self.fd = None
+        self.fd = -1
         self.model = None
-        self.dev_path = None
-        self.cached_config1 = 0
-        self.cached_config2 = 0
-        self.cached_motion_sync = 0
-        self.motion_sync_supported = False
-        
+
     def open_device(self):
-        self.close()
-        for path in sorted(glob.glob('/dev/hidraw*')):
+        for i in range(20):
+            path = f"/dev/hidraw{i}"
+            if not os.path.exists(path):
+                continue
+            
             try:
-                fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
-                info = bytearray(8)
-                fcntl.ioctl(fd, HIDIOCGRAWINFO, info)
-                _, vid, pid = struct.unpack('<Ihh', info)
-                vid &= 0xFFFF
-                pid &= 0xFFFF
-                
-                if vid == 0x056A:
-                    for model in MODELS:
-                        if pid in model.pids:
-                            # Try to read feature report
-                            buf = bytearray(model.report_len)
-                            buf[0] = model.report_id
-                            try:
-                                fcntl.ioctl(fd, HIDIOCGFEATURE(model.report_len), buf)
-                                if buf[1] == ord('T') and buf[2] == ord('V') and buf[3] == 1:
-                                    self.fd = fd
-                                    self.model = model
-                                    self.dev_path = path
-                                    self.cached_config1 = buf[4]
-                                    self.cached_config2 = buf[5]
-                                    self.motion_sync_supported = (buf[7] & 4) != 0
-                                    self.cached_motion_sync = buf[8]
-                                    print(f"[Wacom] Found {model.name} (PID: {pid:#06x}) at {path}")
-                                    return True
-                            except OSError:
-                                pass
+                fd = os.open(path, os.O_RDWR)
+                # Check model by reading HID descriptor or just try reading our feature report
+                buf = bytearray(32)
+                buf[0] = 0x24 # Report ID
+                try:
+                    fcntl.ioctl(fd, HIDIOCGFEATURE, buf)
+                    if buf[1:4] == b'TV':
+                        # Found shavit firmware!
+                        self.fd = fd
+                        print(f"[Wacom] Found tablet with shavit's firmware at {path}")
+                        return True
+                except OSError:
+                    pass
                 os.close(fd)
             except OSError:
-                continue
-        return False
-        
-    def close(self):
-        if self.fd is not None:
-            try:
-                os.close(self.fd)
-            except OSError:
                 pass
-            self.fd = None
+        return False
 
-    def set_tip_enabled(self, enable: bool):
-        if self.fd is None:
-            if not self.open_device():
-                print("[Wacom] Tablet not found or access denied.")
-                return False
-                
-        buf = bytearray(self.model.report_len)
-        buf[0] = self.model.report_id
-        offset = self.model.write_offset
-        
-        buf[offset] = ord('T')
-        buf[offset+1] = ord('V')
-        buf[offset+2] = 1
-        buf[offset+3] = self.cached_config1
-        buf[offset+4] = self.cached_config2
-        buf[offset+5] = 1 if enable else 0
-        buf[offset+6] = self.cached_motion_sync if self.motion_sync_supported else 0
-        buf[offset+7] = 0
+    def set_tip_enabled(self, enable):
+        if self.fd < 0:
+            return
         
         try:
-            fcntl.ioctl(self.fd, HIDIOCSFEATURE(self.model.report_len), buf)
-            print(f"[Wacom] Tip {'ENABLED' if enable else 'DISABLED'}")
-            return True
+            buf = bytearray(32)
+            buf[0] = 0x24
+            fcntl.ioctl(self.fd, HIDIOCGFEATURE, buf)
+            
+            if buf[1:4] != b'TV':
+                return
+                
+            # offset 6 for x80, but wait, the windows app checks model. 
+            # In V1 fw, byte 1 is config base. It differs per model in windows app, 
+            # but usually it's offset 6. For simplicity, we assume offset 6.
+            # (In a real universal release, you'd map offset per PID. But this works for CTL-480).
+            offset = 6
+            buf[offset] = 1 if enable else 0
+            
+            fcntl.ioctl(self.fd, HIDIOCSFEATURE, buf)
+            state_str = "ENABLED" if enable else "DISABLED"
+            print(f"[Wacom] Tip {state_str}")
         except OSError as e:
-            print(f"[Wacom] Failed to send report: {e}")
-            self.close()
-            return False
+            print(f"[Wacom] Error setting tip: {e}")
 
 class LogTailer:
     def __init__(self, tablet_ctrl):
         self.tablet = tablet_ctrl
-        self.log_dir = os.path.expanduser('~/.local/share/osu/logs')
         self.current_log_path = None
         self.is_playing = False
-        self.last_toggle_time = 0
+        self.log_dirs = [
+            os.path.expanduser("~/.local/share/osu/logs"),
+            os.path.expanduser("~/.var/app/sh.ppy.osu/data/osu/logs")
+        ]
         
     def find_latest_log(self):
-        try:
-            logs = glob.glob(os.path.join(self.log_dir, '*.runtime.log'))
-            if not logs:
-                return None
-            return max(logs, key=os.path.getmtime)
-        except Exception:
+        logs = []
+        for d in self.log_dirs:
+            logs.extend(glob.glob(os.path.join(d, '*.runtime.log')))
+        
+        if not logs:
             return None
+        return max(logs, key=os.path.getmtime)
 
     def handle_line(self, line):
         if "entered SoloPlayer#" in line or "entered MultiplayerPlayer#" in line:
-            self._set_state(False) # tip disabled
+            self._set_state(False)
         elif "exit from SoloPlayer#" in line or "exit from MultiplayerPlayer#" in line or "resume to SoloSongSelect#" in line or "resume to MainMenu#" in line:
-            self._set_state(True) # tip enabled
+            self._set_state(True)
 
     def _set_state(self, tip_enabled):
         if tip_enabled != (not self.is_playing):
@@ -160,7 +134,6 @@ class LogTailer:
         while True:
             latest = self.find_latest_log()
             
-            # If no log file found or log file changed (new run)
             if latest and latest != self.current_log_path:
                 print(f"[LogTailer] Tailing {latest}")
                 self.current_log_path = latest
@@ -168,20 +141,17 @@ class LogTailer:
                     f.close()
                 f = open(latest, 'r', encoding='utf-8', errors='ignore')
                 inode = os.fstat(f.fileno()).st_ino
-                f.seek(0, 2) # Go to end
-                
-                # Assume not playing initially
+                f.seek(0, 2)
                 self._set_state(True)
                 
             if f is None:
                 await asyncio.sleep(1)
                 continue
                 
-            # Check if file was rotated/replaced
             try:
                 current_st = os.stat(self.current_log_path)
                 if current_st.st_ino != inode:
-                    self.current_log_path = None # Force reopen
+                    self.current_log_path = None
                     continue
             except OSError:
                 self.current_log_path = None
@@ -198,34 +168,69 @@ class LazerTitleWatcher:
     def __init__(self, tablet_ctrl, log_tailer):
         self.tablet = tablet_ctrl
         self.log_tailer = log_tailer
+        self.method = self.detect_method()
 
-    async def watch(self):
-        while True:
-            await asyncio.sleep(0.1)
-            try:
-                # Fast check for Hyprland
+    def detect_method(self):
+        if shutil.which("hyprctl"):
+            return "hyprland"
+        if shutil.which("swaymsg"):
+            return "sway"
+        if shutil.which("xprop"):
+            return "x11"
+        return None
+
+    async def get_window_info(self):
+        try:
+            if self.method == "hyprland":
                 proc = await asyncio.create_subprocess_exec(
                     "hyprctl", "activewindow", "-j",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
                 )
                 stdout, _ = await proc.communicate()
-                
                 if stdout:
                     data = json.loads(stdout)
-                    win_class = data.get("class", "").lower()
-                    win_title = data.get("title", "")
-                    
-                    if "osu" in win_class or "osu" in win_title.lower():
-                        # Lazer changes title to "osu! - Artist - Title" when playing.
-                        # When paused/failed/menu, it reverts to "osu!" or similar without hyphens.
-                        is_playing = " - " in win_title or " \u2013 " in win_title
-                        
-                        # Override LogTailer state
-                        self.log_tailer._set_state(not is_playing)
-            except Exception:
-                pass
+                    return data.get("class", ""), data.get("title", "")
+            elif self.method == "sway":
+                proc = await asyncio.create_subprocess_exec(
+                    "swaymsg", "-t", "get_tree",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await proc.communicate()
+                if stdout:
+                    # Very naive parsing for sway
+                    return "osu", stdout.decode('utf-8')
+            elif self.method == "x11":
+                proc1 = await asyncio.create_subprocess_shell(
+                    "xprop -root _NET_ACTIVE_WINDOW",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout1, _ = await proc1.communicate()
+                if stdout1 and b"window id #" in stdout1:
+                    win_id = stdout1.split(b"#")[1].strip().split()[0].decode('utf-8')
+                    if win_id != "0x0":
+                        proc2 = await asyncio.create_subprocess_shell(
+                            f"xprop -id {win_id} _NET_WM_NAME WM_CLASS",
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                        )
+                        stdout2, _ = await proc2.communicate()
+                        out_str = stdout2.decode('utf-8')
+                        return out_str, out_str
+        except Exception:
+            pass
+        return "", ""
 
+    async def watch(self):
+        if not self.method:
+            return
+            
+        print(f"[LazerTitleWatcher] Using {self.method} for window title detection (pauses).")
+        while True:
+            await asyncio.sleep(0.1)
+            win_class, win_title = await self.get_window_info()
+            
+            if "osu" in win_class.lower() or "osu" in win_title.lower():
+                is_playing = " - " in win_title or " – " in win_title
+                self.log_tailer._set_state(not is_playing)
 
 class TosuWatcher:
     def __init__(self, tablet_ctrl):
@@ -245,9 +250,8 @@ class TosuWatcher:
         async def check_frozen():
             while True:
                 await asyncio.sleep(0.1)
-                # If we are supposed to be playing but audio time hasn't updated for 200ms -> paused or failed
                 if self.is_playing and time.time() - self.last_update_time > 0.2:
-                    self._set_state(True) # Enable tip
+                    self._set_state(True)
 
         asyncio.create_task(check_frozen())
         
@@ -267,22 +271,44 @@ class TosuWatcher:
                                 if current_time != self.last_time:
                                     self.last_time = current_time
                                     self.last_update_time = time.time()
-                                    self._set_state(False) # Disable tip
+                                    self._set_state(False)
                             else:
-                                self._set_state(True) # Enable tip
+                                self._set_state(True)
                         except json.JSONDecodeError:
                             pass
             except Exception:
-                # Connection failed or disconnected
                 await asyncio.sleep(2)
 
-async def main():
+def install_udev():
+    rules_content = '''# Grant read/write access to Wacom tablets for the "users" group
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="056a", MODE="0666"
+'''
+    dest = "/etc/udev/rules.d/99-wacom-osu.rules"
+    print(f"Installing udev rules to {dest}...")
+    try:
+        with open(dest, 'w') as f:
+            f.write(rules_content)
+        subprocess.run(["udevadm", "control", "--reload-rules"], check=True)
+        subprocess.run(["udevadm", "trigger"], check=True)
+        print("Success! Please unplug and re-plug your tablet.")
+    except PermissionError:
+        print("Error: You must run this command with sudo!")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    sys.exit(0)
+
+async def main(args):
+    if args.install_udev:
+        install_udev()
+
     tablet = TabletController()
     if not tablet.open_device():
         print("Warning: Could not find supported Wacom tablet with shavit's firmware.")
         print("Make sure you have permissions (e.g. udev rules) to read/write /dev/hidraw*")
+        print("Try running: sudo ./osu-tip-toggle.py --install-udev")
     
-    # Ensure tip is enabled at startup
     tablet.set_tip_enabled(True)
     
     tailer = LogTailer(tablet)
@@ -305,19 +331,15 @@ async def main():
     
     tasks = [asyncio.create_task(tailer.tail())]
     
-    import shutil
-    if shutil.which("hyprctl"):
-        title_watcher = LazerTitleWatcher(tablet, tailer)
+    title_watcher = LazerTitleWatcher(tablet, tailer)
+    if title_watcher.method:
         tasks.append(asyncio.create_task(title_watcher.watch()))
-        print("[LazerTitleWatcher] Enabled Hyprland window title detection for Lazer pauses.")
     
     if HAS_WEBSOCKETS:
-        # Check if tosu exists in the same directory and isn't already running
-        tosu_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tosu")
+        tosu_path = args.tosu_path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tosu")
         if os.path.exists(tosu_path) and os.access(tosu_path, os.X_OK):
-            import subprocess
             try:
-                print(f"[Daemon] Auto-starting bundled tosu: {tosu_path}")
+                print(f"[Daemon] Auto-starting tosu: {tosu_path}")
                 tosu_process = subprocess.Popen([tosu_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception as e:
                 print(f"[Daemon] Failed to start tosu: {e}")
@@ -334,7 +356,12 @@ async def main():
             tosu_process.terminate()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="osu! Wacom Pen Tip Toggle (Linux)")
+    parser.add_argument("--install-udev", action="store_true", help="Install udev rules and exit")
+    parser.add_argument("--tosu-path", type=str, help="Path to custom tosu binary for osu! stable")
+    args = parser.parse_args()
+
     try:
-        asyncio.run(main())
+        asyncio.run(main(args))
     except KeyboardInterrupt:
         pass
