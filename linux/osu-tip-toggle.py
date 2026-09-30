@@ -89,10 +89,21 @@ class TabletController:
                 if buf[1:4] != b'TV':
                     continue
                     
-                offset = 6
-                buf[offset] = 1 if enable else 0
+                # Create a fresh buffer to write to avoid sending back read-only data
+                write_buf = bytearray(32)
+                write_buf[0] = 0x24
+                write_buf[1] = ord('T')
+                write_buf[2] = ord('V')
+                write_buf[3] = 1
+                # Copy configs
+                write_buf[4] = buf[4]
+                write_buf[5] = buf[5]
+                # Tip flag
+                write_buf[6] = 1 if enable else 0
+                # Motion sync
+                write_buf[7] = buf[7]
                 
-                fcntl.ioctl(fd, HIDIOCSFEATURE, buf)
+                fcntl.ioctl(fd, HIDIOCSFEATURE, write_buf)
                 success = True
             except OSError:
                 pass
