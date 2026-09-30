@@ -11,7 +11,7 @@ By automatically **disabling your pen tip and buttons while playing a map**, the
 - **osu! (stable)** - **Full Support** | Active gameplay, pause screens, intro / skip detection, song select, and menus.
 - **osu! (lazer)** - **Basic Support** | Only detects whether you are playing a beatmap or are in the menu / song select.
 
-**Tested on:** CTH-480, CTL-472, CTL-4100<br>
+**Tested on:** CTH-480, CTL-472, CTL-490, CTL-4100<br>
 **Platform:** Windows 10/11, requires NET 4.8
 
 ---
