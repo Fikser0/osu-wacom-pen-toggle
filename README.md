@@ -37,7 +37,7 @@ This tool bridges that gap by reading osu! state in real time:
 | :--- |
 | CTL-480 / CTL-680 |
 | CTL-472 / CTL-672 |
-| CTL-490 |
+| CTL-490 / CTL-690 |
 | CTL-4100 / CTL-6100 |
 
 ### Client Support
