@@ -1,6 +1,6 @@
 # osu! Wacom Pen Tip Auto-Toggle
 
-Automatically toggles the "Pressure & Buttons" setting on Wacom tablets running shavit's 1000 Hz firmware based on osu! game state.
+Automatically toggles the **Pressure & Buttons** setting on Wacom tablets running shavit's 1000 Hz firmware based on osu! game state.
 
 <img width="1890" height="540" alt="wacom-comparison" src="https://github.com/user-attachments/assets/b284fec9-d390-4a68-8d35-683f6f5a51f2" />
 
@@ -10,16 +10,16 @@ Automatically toggles the "Pressure & Buttons" setting on Wacom tablets running 
 
 On Wacom tablets running shavit's 1000 Hz custom firmware, reading pen pressure and button state can overwhelm the microcontroller, resulting in dropped reports (visible tracking gaps).
 
-Disabling **Pressure & Buttons** in the firmware resolves these packet drops, but leaves the pen unable to click menus, select songs, or skip map intros.
+Disabling pressure and buttons in the firmware resolves these packet drops, but leaves the pen unable to click menus, select songs, or skip map intros.
 
 This tool bridges that gap by reading osu! state in real time:
 - **Gameplay:** Disables pressure and buttons to maintain consistent 1000 Hz tracking.
-- **Menus, Pauses, & Intros:** Re-enables pressure and buttons so the pen functions normally.
+- **Menus, Pauses, and Intros:** Re-enables pressure and buttons so the pen functions normally.
 
 ## Features
 
 - **Automatic Toggling:** Disables pressure and buttons during beatmaps and re-enables them on menus, pauses, breaks, and result screens.
-- **Intro & Outro Detection (osu!stable):** Reads beatmap files to find the first and last hit objects. Keeps clicking enabled during long intros (for skipping) and re-enables it right after the final note.
+- **Intro and Outro Detection (osu!stable):** Reads beatmap files to find the first and last hit objects. Keeps clicking enabled during long intros (for skipping) and re-enables it right after the final note.
 - **Hotplug Support:** Listens to `WM_DEVICECHANGE` events to re-hook tablets when reconnected.
 - **System Tray:** Minimizes to the tray with live status tooltips.
 
@@ -52,7 +52,7 @@ This tool bridges that gap by reading osu! state in real time:
    - **osu! (stable):** Reads in-game memory using `OsuMemoryDataProvider` to know the exact millisecond gameplay starts, pauses, or ends.
    - **osu! (lazer):** Watches the osu! window title to detect when a beatmap is active.
 2. **Sends HID Feature Reports:**
-   - Sends HID feature reports to the tablet to change the firmware setting on the fly.
+   - Sends HID feature reports to the tablet to change the firmware setting. (same as toggling it on the website)
    - Changes are written to volatile RAM only—firmware flash memory is untouched. Unplugging the tablet or closing the app restores default behavior.
 
 ## Usage
@@ -63,5 +63,5 @@ This tool bridges that gap by reading osu! state in real time:
 
 ## Credits
 
-- **[shavit](https://github.com/shavitush)** — For creating the custom 1000 Hz Wacom firmware.
-- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)**.
+- **[shavit](https://github.com/shavitush)** — For creating the custom 1000 Hz Wacom firmwares.
+- **[Piotrekol](https://github.com/Piotrekol)** — For **[OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder/tree/master/OsuMemoryDataProvider)**. (used for state detection)
