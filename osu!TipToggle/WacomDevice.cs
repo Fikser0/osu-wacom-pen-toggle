@@ -19,6 +19,7 @@ namespace osu_TipToggle
         public static string LastDetectedModel { get; private set; } = "Searching...";
 
         private static readonly object _syncLock = new();
+        private static volatile bool _cacheInvalidated = false;
         private static string? _cachedDevicePath = null;
         private static byte _cachedReportId = 0;
         private static int _cachedReportLength = 0;
@@ -26,10 +27,7 @@ namespace osu_TipToggle
 
         public static void InvalidateCache()
         {
-            lock (_syncLock)
-            {
-                InvalidateCacheInternal();
-            }
+            _cacheInvalidated = true;
         }
 
         private static void InvalidateCacheInternal()
@@ -96,6 +94,12 @@ namespace osu_TipToggle
         {
             lock (_syncLock)
             {
+                if (_cacheInvalidated)
+                {
+                    InvalidateCacheInternal();
+                    _cacheInvalidated = false;
+                }
+
                 string? cachedPath = _cachedDevicePath;
                 if (!string.IsNullOrEmpty(cachedPath))
                 {
@@ -259,7 +263,7 @@ namespace osu_TipToggle
                             if (readBuf != null)
                             {
                                 string modelName = isSupported ? knownName : $"Wacom PID 0x{attr.ProductID:X4}";
-                                int writeOffset = isSupported ? defaultOffset : (reportId == 96 ? 1 : 1);
+                                int writeOffset = isSupported ? defaultOffset : (reportId == 96 ? 3 : 1);
 
                                 LastDetectedModel = $"{modelName} (Report 0x{reportId:X2})";
 

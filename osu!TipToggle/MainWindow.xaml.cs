@@ -57,8 +57,9 @@ namespace osu_TipToggle
         private long _lastLazerScanMs = 0;
 
         private const int MinHardwareToggleIntervalMs = 1000;
-        private const int HardwareSearchRetryIntervalMs = 15000;
+        private const int HardwareSearchRetryIntervalMs = 10000;
         private long _lastHardwareToggleTimeMs = 0;
+        private long _nextHardwareAttemptMs = 0;
         private bool? _pendingHardwareState = null;
 
         // UI transition smoothing
@@ -188,7 +189,6 @@ namespace osu_TipToggle
         private const uint NIF_TIP = 0x00000004;
 
         private const int WM_DEVICECHANGE = 0x0219;
-        private long _lastDeviceSearchMs = 0;
         private const int WM_TRAYICON = 0x8000 + 100;
         private const int WM_LBUTTONUP = 0x0202;
         private const int WM_LBUTTONDBLCLK = 0x0203;
@@ -382,7 +382,7 @@ namespace osu_TipToggle
                 WacomDevice.InvalidateCache();
                 _lastTargetState = null;
                 _lastHardwareToggleTimeMs = 0;
-                _lastDeviceSearchMs = 0;
+                _nextHardwareAttemptMs = 0;
             }
 
             if (msg == WM_TRAYICON)
@@ -522,17 +522,21 @@ namespace osu_TipToggle
                 return _lastStablePid;
             }
 
-            if (now - _lastStableProcessCheckMs < 350 && _lastStablePid > 0)
+            if (now - _lastStableProcessCheckMs < 350)
             {
-                try
+                if (_lastStablePid > 0)
                 {
-                    using var existing = Process.GetProcessById(_lastStablePid);
-                    if (!existing.HasExited) return _lastStablePid;
+                    try
+                    {
+                        using var existing = Process.GetProcessById(_lastStablePid);
+                        if (!existing.HasExited) return _lastStablePid;
+                    }
+                    catch
+                    {
+                        _lastStablePid = -1;
+                    }
                 }
-                catch
-                {
-                    _lastStablePid = -1;
-                }
+                return _lastStablePid;
             }
             _lastStableProcessCheckMs = now;
 
@@ -541,23 +545,29 @@ namespace osu_TipToggle
                 var procs = Process.GetProcessesByName("osu!");
                 if (procs.Length == 0) procs = Process.GetProcessesByName("osu");
 
+                int matchedPid = -1;
                 foreach (var p in procs)
                 {
                     try
                     {
-                        if (p.HasExited) continue;
+                        if (matchedPid == -1 && !p.HasExited)
+                        {
+                            string? modulePath = null;
+                            try { modulePath = p.MainModule?.FileName?.ToLowerInvariant(); } catch { }
 
-                        string? modulePath = p.MainModule?.FileName?.ToLowerInvariant();
-                        if (modulePath != null && (modulePath.Contains("osulazer") || modulePath.Contains("osu-lazer")))
-                            continue;
-
-                        return p.Id;
+                            if (modulePath == null || (!modulePath.Contains("osulazer") && !modulePath.Contains("osu-lazer")))
+                            {
+                                matchedPid = p.Id;
+                            }
+                        }
                     }
-                    catch
+                    catch { }
+                    finally
                     {
-                        if (!p.HasExited) return p.Id;
+                        p.Dispose();
                     }
                 }
+                return matchedPid;
             }
             catch { }
             return -1;
@@ -969,30 +979,31 @@ namespace osu_TipToggle
                         string? hardwareResult = null;
                         long currentMs = _stopwatch.ElapsedMilliseconds;
 
-                        bool isHwUnavailable = (_lastHardwareResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                                _lastHardwareResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                        if (isHwUnavailable && (currentMs - _lastDeviceSearchMs > HardwareSearchRetryIntervalMs))
-                        {
-                            _lastDeviceSearchMs = currentMs;
-                            _lastTargetState = null;
-                            _lastHardwareToggleTimeMs = 0;
-                        }
-
                         if (token.IsCancellationRequested) break;
 
                         if (_lastTargetState == null)
                         {
-                            _pendingHardwareState = isActivelyPlaying;
-                            hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
-                            if (hardwareResult != null)
+                            if (currentMs >= _nextHardwareAttemptMs)
                             {
-                                _lastHardwareResult = hardwareResult;
-                                bool isSuccess = hardwareResult == "Active (ON)" || hardwareResult == "Disabled (OFF)";
-                                if (isSuccess)
+                                _pendingHardwareState = isActivelyPlaying;
+                                hardwareResult = WacomDevice.SetPressureAndButtons(!isActivelyPlaying);
+                                if (hardwareResult != null)
                                 {
-                                    _lastTargetState = isActivelyPlaying;
-                                    _lastHardwareToggleTimeMs = currentMs;
+                                    _lastHardwareResult = hardwareResult;
+                                    bool isSuccess = hardwareResult == "Active (ON)" || hardwareResult == "Disabled (OFF)";
+                                    if (isSuccess)
+                                    {
+                                        _lastTargetState = isActivelyPlaying;
+                                        _lastHardwareToggleTimeMs = currentMs;
+                                    }
+                                    else
+                                    {
+                                        _nextHardwareAttemptMs = currentMs + HardwareSearchRetryIntervalMs;
+                                    }
+                                }
+                                else
+                                {
+                                    _nextHardwareAttemptMs = currentMs + HardwareSearchRetryIntervalMs;
                                 }
                             }
                         }
@@ -1012,6 +1023,16 @@ namespace osu_TipToggle
                                         _lastTargetState = isActivelyPlaying;
                                         _lastHardwareToggleTimeMs = currentMs;
                                     }
+                                    else
+                                    {
+                                        _lastTargetState = null;
+                                        _nextHardwareAttemptMs = currentMs + HardwareSearchRetryIntervalMs;
+                                    }
+                                }
+                                else
+                                {
+                                    _lastTargetState = null;
+                                    _nextHardwareAttemptMs = currentMs + HardwareSearchRetryIntervalMs;
                                 }
                             }
                         }
@@ -1022,147 +1043,147 @@ namespace osu_TipToggle
 
                         // UI status update debounce
                         bool isPauseResumeUiTransition =
-                    (candidateCategory == DisplayCategory.Paused && _currentAppliedCategory == DisplayCategory.Playing) ||
-                    (candidateCategory == DisplayCategory.Playing && _currentAppliedCategory == DisplayCategory.Paused);
+                            (candidateCategory == DisplayCategory.Paused && _currentAppliedCategory == DisplayCategory.Playing) ||
+                            (candidateCategory == DisplayCategory.Playing && _currentAppliedCategory == DisplayCategory.Paused);
 
-                bool uiStateChanged = false;
+                        bool uiStateChanged = false;
 
-                if (isPauseResumeUiTransition)
-                {
-                    _currentAppliedCategory = candidateCategory;
-                    _appliedIsLazer = isLazerCandidate;
-                    _appliedMenuStatusDetail = menuStatusDetail;
-                    _pendingCategory = candidateCategory;
-                    _pendingIsLazer = isLazerCandidate;
-                    _pendingMenuStatusDetail = menuStatusDetail;
-                    _pendingCategoryStartTime = currentMs;
-                    uiStateChanged = true;
-                }
-                else
-                {
-                    if (candidateCategory != _pendingCategory || isLazerCandidate != _pendingIsLazer || menuStatusDetail != _pendingMenuStatusDetail)
-                    {
-                        _pendingCategory = candidateCategory;
-                        _pendingIsLazer = isLazerCandidate;
-                        _pendingMenuStatusDetail = menuStatusDetail;
-                        _pendingCategoryStartTime = currentMs;
-                    }
-
-                    if (_currentAppliedCategory == DisplayCategory.None ||
-                        ((_pendingCategory != _currentAppliedCategory || _pendingIsLazer != _appliedIsLazer || _pendingMenuStatusDetail != _appliedMenuStatusDetail) &&
-                         (currentMs - _pendingCategoryStartTime >= UiDebounceMs)))
-                    {
-                        _currentAppliedCategory = _pendingCategory;
-                        _appliedIsLazer = _pendingIsLazer;
-                        _appliedMenuStatusDetail = _pendingMenuStatusDetail;
-                        uiStateChanged = true;
-                    }
-                }
-
-                string gameStateText;
-                Color dotColor;
-
-                string clientPrefix = _appliedIsLazer ? "osu!(Lazer): " : "osu!(stable): ";
-
-                switch (_currentAppliedCategory)
-                {
-                    case DisplayCategory.Playing:
-                        gameStateText = $"{clientPrefix}Playing a beatmap";
-                        dotColor = Color.FromRgb(236, 72, 153);
-                        break;
-                    case DisplayCategory.SkipIntro:
-                        gameStateText = $"{clientPrefix}Intro skip available";
-                        dotColor = Color.FromRgb(59, 130, 246);
-                        break;
-                    case DisplayCategory.Paused:
-                        gameStateText = $"{clientPrefix}Paused in beatmap";
-                        dotColor = Color.FromRgb(234, 179, 8);
-                        break;
-                    case DisplayCategory.Menu:
-                        string menuDetail = _appliedIsLazer
-                            ? "In menus"
-                            : (string.IsNullOrEmpty(_appliedMenuStatusDetail) ? "Main menu" : _appliedMenuStatusDetail);
-                        gameStateText = $"{clientPrefix}{menuDetail}";
-                        dotColor = Color.FromRgb(34, 197, 94);
-                        break;
-                    case DisplayCategory.Connecting:
-                        gameStateText = $"{clientPrefix}{_appliedMenuStatusDetail}";
-                        dotColor = Color.FromRgb(234, 179, 8);
-                        break;
-                    default:
-                        gameStateText = "Waiting for osu! to launch...";
-                        dotColor = Color.FromRgb(113, 113, 122);
-                        break;
-                }
-
-                string detectedTabletInfo = WacomDevice.LastDetectedModel;
-
-                bool shouldUpdateAudio = (currentMs - _lastUiAudioUpdateMs >= 80) && (_lastUiAudioText != audioTimeText);
-                bool shouldUpdateTablet = (_lastUiTabletInfo != detectedTabletInfo);
-
-                if (hardwareResult != null || uiStateChanged || shouldUpdateAudio || shouldUpdateTablet)
-                {
-                    if (shouldUpdateAudio)
-                    {
-                        _lastUiAudioUpdateMs = currentMs;
-                        _lastUiAudioText = audioTimeText;
-                    }
-                    if (shouldUpdateTablet)
-                    {
-                        _lastUiTabletInfo = detectedTabletInfo;
-                    }
-
-                    string capturedAudio = audioTimeText;
-                    string capturedTablet = detectedTabletInfo;
-                    string? capturedHwResult = hardwareResult;
-                    bool capturedUiChanged = uiStateChanged;
-                    bool capturedIsPlaying = isActivelyPlaying;
-                    string capturedGameText = gameStateText;
-                    Color capturedColor = dotColor;
-
-                    Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        bool isWindowVisible = IsVisible && WindowState != WindowState.Minimized;
-
-                        if (isWindowVisible)
+                        if (isPauseResumeUiTransition)
                         {
-                            if (shouldUpdateAudio) TxtAudioTime.Text = capturedAudio;
+                            _currentAppliedCategory = candidateCategory;
+                            _appliedIsLazer = isLazerCandidate;
+                            _appliedMenuStatusDetail = menuStatusDetail;
+                            _pendingCategory = candidateCategory;
+                            _pendingIsLazer = isLazerCandidate;
+                            _pendingMenuStatusDetail = menuStatusDetail;
+                            _pendingCategoryStartTime = currentMs;
+                            uiStateChanged = true;
+                        }
+                        else
+                        {
+                            if (candidateCategory != _pendingCategory || isLazerCandidate != _pendingIsLazer || menuStatusDetail != _pendingMenuStatusDetail)
+                            {
+                                _pendingCategory = candidateCategory;
+                                _pendingIsLazer = isLazerCandidate;
+                                _pendingMenuStatusDetail = menuStatusDetail;
+                                _pendingCategoryStartTime = currentMs;
+                            }
+
+                            if (_currentAppliedCategory == DisplayCategory.None ||
+                                ((_pendingCategory != _currentAppliedCategory || _pendingIsLazer != _appliedIsLazer || _pendingMenuStatusDetail != _appliedMenuStatusDetail) &&
+                                 (currentMs - _pendingCategoryStartTime >= UiDebounceMs)))
+                            {
+                                _currentAppliedCategory = _pendingCategory;
+                                _appliedIsLazer = _pendingIsLazer;
+                                _appliedMenuStatusDetail = _pendingMenuStatusDetail;
+                                uiStateChanged = true;
+                            }
+                        }
+
+                        string gameStateText;
+                        Color dotColor;
+
+                        string clientPrefix = _appliedIsLazer ? "osu!(Lazer): " : "osu!(stable): ";
+
+                        switch (_currentAppliedCategory)
+                        {
+                            case DisplayCategory.Playing:
+                                gameStateText = $"{clientPrefix}Playing a beatmap";
+                                dotColor = Color.FromRgb(236, 72, 153);
+                                break;
+                            case DisplayCategory.SkipIntro:
+                                gameStateText = $"{clientPrefix}Intro skip available";
+                                dotColor = Color.FromRgb(59, 130, 246);
+                                break;
+                            case DisplayCategory.Paused:
+                                gameStateText = $"{clientPrefix}Paused in beatmap";
+                                dotColor = Color.FromRgb(234, 179, 8);
+                                break;
+                            case DisplayCategory.Menu:
+                                string menuDetail = _appliedIsLazer
+                                    ? "In menus"
+                                    : (string.IsNullOrEmpty(_appliedMenuStatusDetail) ? "Main menu" : _appliedMenuStatusDetail);
+                                gameStateText = $"{clientPrefix}{menuDetail}";
+                                dotColor = Color.FromRgb(34, 197, 94);
+                                break;
+                            case DisplayCategory.Connecting:
+                                gameStateText = $"{clientPrefix}{_appliedMenuStatusDetail}";
+                                dotColor = Color.FromRgb(234, 179, 8);
+                                break;
+                            default:
+                                gameStateText = "Waiting for osu! to launch...";
+                                dotColor = Color.FromRgb(113, 113, 122);
+                                break;
+                        }
+
+                        string detectedTabletInfo = WacomDevice.LastDetectedModel;
+
+                        bool shouldUpdateAudio = (currentMs - _lastUiAudioUpdateMs >= 80) && (_lastUiAudioText != audioTimeText);
+                        bool shouldUpdateTablet = (_lastUiTabletInfo != detectedTabletInfo);
+
+                        if (hardwareResult != null || uiStateChanged || shouldUpdateAudio || shouldUpdateTablet)
+                        {
+                            if (shouldUpdateAudio)
+                            {
+                                _lastUiAudioUpdateMs = currentMs;
+                                _lastUiAudioText = audioTimeText;
+                            }
                             if (shouldUpdateTablet)
                             {
-                                TxtDetectedTablet.Text = capturedTablet.Equals("Not Found", StringComparison.OrdinalIgnoreCase)
-                                    ? "Connect device"
-                                    : $"Device: {capturedTablet}";
+                                _lastUiTabletInfo = detectedTabletInfo;
                             }
-                        }
 
-                        if (capturedHwResult != null)
-                        {
-                            if (isWindowVisible)
+                            string capturedAudio = audioTimeText;
+                            string capturedTablet = detectedTabletInfo;
+                            string? capturedHwResult = hardwareResult;
+                            bool capturedUiChanged = uiStateChanged;
+                            bool capturedIsPlaying = isActivelyPlaying;
+                            string capturedGameText = gameStateText;
+                            Color capturedColor = dotColor;
+
+                            Dispatcher.BeginInvoke(new Action(() =>
                             {
-                                TxtTabletStatus.Text = $"Pressure & Buttons: {capturedHwResult}";
-                                bool isUnavailable = (capturedHwResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                                      capturedHwResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
+                                bool isWindowVisible = IsVisible && WindowState != WindowState.Minimized;
 
-                                Color tabletDotColor = isUnavailable
-                                    ? Color.FromRgb(113, 113, 122)
-                                    : (capturedIsPlaying ? Color.FromRgb(239, 68, 68) : Color.FromRgb(59, 130, 246));
-                                AnimateDotColor(TabletStatusDot, tabletDotColor);
-                                TxtLog.Text = $"[{DateTime.Now:HH:mm:ss}] Hardware -> {capturedHwResult}";
-                            }
-                            UpdateTrayTooltip();
-                        }
+                                if (isWindowVisible)
+                                {
+                                    if (shouldUpdateAudio) TxtAudioTime.Text = capturedAudio;
+                                    if (shouldUpdateTablet)
+                                    {
+                                        TxtDetectedTablet.Text = capturedTablet.Equals("Not Found", StringComparison.OrdinalIgnoreCase)
+                                            ? "Connect device"
+                                            : $"Device: {capturedTablet}";
+                                    }
+                                }
 
-                        if (capturedUiChanged)
-                        {
-                            if (isWindowVisible)
-                            {
-                                TxtGameStatus.Text = capturedGameText;
-                                AnimateDotColor(GameStatusDot, capturedColor);
-                            }
-                            UpdateTrayTooltip();
+                                if (capturedHwResult != null)
+                                {
+                                    if (isWindowVisible)
+                                    {
+                                        TxtTabletStatus.Text = $"Pressure & Buttons: {capturedHwResult}";
+                                        bool isUnavailable = (capturedHwResult.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                              capturedHwResult.IndexOf("not available", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                                        Color tabletDotColor = isUnavailable
+                                            ? Color.FromRgb(113, 113, 122)
+                                            : (capturedIsPlaying ? Color.FromRgb(239, 68, 68) : Color.FromRgb(59, 130, 246));
+                                        AnimateDotColor(TabletStatusDot, tabletDotColor);
+                                        TxtLog.Text = $"[{DateTime.Now:HH:mm:ss}] Hardware -> {capturedHwResult}";
+                                    }
+                                    UpdateTrayTooltip();
+                                }
+
+                                if (capturedUiChanged)
+                                {
+                                    if (isWindowVisible)
+                                    {
+                                        TxtGameStatus.Text = capturedGameText;
+                                        AnimateDotColor(GameStatusDot, capturedColor);
+                                    }
+                                    UpdateTrayTooltip();
+                                }
+                            }));
                         }
-                    }));
-                }
 
                         int pollDelay = (readGeneral || currentStablePid > 0 || _cachedLazerHwnd != IntPtr.Zero) ? 25 : 200;
                         await Task.Delay(pollDelay, token);
