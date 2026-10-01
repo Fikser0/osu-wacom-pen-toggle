@@ -496,18 +496,25 @@ namespace osu_TipToggle
         {
             if (_restoreWaitHandle == null) return;
 
-            WaitHandle[] handles = new WaitHandle[] { _restoreWaitHandle, token.WaitHandle };
-            while (!token.IsCancellationRequested)
+            try
             {
-                int index = WaitHandle.WaitAny(handles);
-                if (index == 0)
+                WaitHandle[] handles = new WaitHandle[] { _restoreWaitHandle, token.WaitHandle };
+                while (!token.IsCancellationRequested)
                 {
-                    Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+                    int index = WaitHandle.WaitAny(handles);
+                    if (index == 0)
+                    {
+                        Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
-                else
-                {
-                    break;
-                }
+            }
+            catch
+            {
+                
             }
         }
 
