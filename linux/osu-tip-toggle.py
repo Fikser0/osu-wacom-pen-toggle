@@ -343,7 +343,7 @@ async def main(args):
         print("Make sure you have permissions (e.g. udev rules) to read/write /dev/hidraw*")
         print("Try running: sudo ./osu-tip-toggle.py --install-udev")
     
-    if otd_was_active:
+    if otd_was_active or args.ensure_otd:
         print("[Daemon] Restarting OpenTabletDriver...")
         try:
             subprocess.run(["systemctl", "--user", "start", "opentabletdriver.service"])
@@ -401,6 +401,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="osu! Wacom Pen Tip Toggle (Linux)")
     parser.add_argument("--install-udev", action="store_true", help="Install udev rules and exit")
     parser.add_argument("--tosu-path", type=str, help="Path to custom tosu binary for osu! stable")
+    parser.add_argument("--ensure-otd", action="store_true", help="Always ensure OTD is running after grabbing tablet")
     args = parser.parse_args()
 
     try:
