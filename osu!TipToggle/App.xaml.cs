@@ -14,6 +14,8 @@ namespace osu_TipToggle
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
             _mutex = new Mutex(true, MutexName, out bool createdNew);
             _hasHandle = createdNew;
 

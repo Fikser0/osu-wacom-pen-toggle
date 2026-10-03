@@ -220,6 +220,7 @@ namespace osu_TipToggle
             string appVersion = GetAppVersion();
             Title = $"osu!TipToggle v{appVersion}";
             TxtVersion.Text = $"v{appVersion}";
+            TxtLog.Text = $"[{DateTime.Now:HH:mm:ss}] Hardware -> Ready";
 
             _reader = StructuredOsuMemoryReader.Instance;
             _baseAddresses = new OsuBaseAddresses();
@@ -231,7 +232,7 @@ namespace osu_TipToggle
             {
                 var helper = new WindowInteropHelper(this);
                 helper.EnsureHandle();
-                HideToTray();
+                AddTrayIcon();
                 StartBackgroundTasks();
             }
             else
@@ -278,22 +279,23 @@ namespace osu_TipToggle
         private void HideToTray()
         {
             AddTrayIcon();
-            ShowInTaskbar = false;
             Hide();
         }
 
         public void RestoreFromTray()
         {
             RemoveTrayIcon();
-            ShowInTaskbar = true;
             Show();
             WindowState = WindowState.Normal;
             Activate();
             Topmost = true;
             Topmost = false;
             Focus();
+
             _lastUiAudioText = "";
             _lastUiTabletInfo = "";
+            _currentAppliedCategory = DisplayCategory.None;
+            _lastTargetState = null;
         }
 
         private string GetHardwareSummaryText()
@@ -530,6 +532,7 @@ namespace osu_TipToggle
             catch { }
 
             WacomDevice.SetPressureAndButtons(true);
+            Application.Current.Shutdown();
         }
 
         private void ListenForRestore(CancellationToken token)
