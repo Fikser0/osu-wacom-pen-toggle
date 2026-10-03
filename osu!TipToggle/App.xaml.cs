@@ -17,27 +17,6 @@ namespace osu_TipToggle
             _mutex = new Mutex(true, MutexName, out bool createdNew);
             _hasHandle = createdNew;
 
-            if (!_hasHandle)
-            {
-                try
-                {
-                    if (EventWaitHandle.TryOpenExisting(RestoreEventName, out EventWaitHandle? restoreEvent))
-                    {
-                        restoreEvent.Set();
-                        restoreEvent.Dispose();
-                    }
-                }
-                catch
-                {
-
-                }
-
-                Shutdown();
-                return;
-            }
-
-            base.OnStartup(e);
-
             bool startInTray = false;
             foreach (var arg in e.Args)
             {
@@ -49,6 +28,31 @@ namespace osu_TipToggle
                     break;
                 }
             }
+
+            if (!_hasHandle)
+            {
+                // Only bring the existing instance forward if launched normally (without -tray)
+                if (!startInTray)
+                {
+                    try
+                    {
+                        if (EventWaitHandle.TryOpenExisting(RestoreEventName, out EventWaitHandle? restoreEvent))
+                        {
+                            restoreEvent.Set();
+                            restoreEvent.Dispose();
+                        }
+                    }
+                    catch
+                    {
+
+                    }
+                }
+
+                Shutdown();
+                return;
+            }
+
+            base.OnStartup(e);
 
             var mainWindow = new MainWindow(startInTray);
             MainWindow = mainWindow;
