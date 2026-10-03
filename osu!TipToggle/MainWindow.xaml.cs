@@ -36,6 +36,7 @@ namespace osu_TipToggle
 
         private int _lastAudioTime = -1;
         private int _frozenTicks = 0;
+        private int _advancingTicks = 0;
         private bool _hasAudioStarted = false;
         private bool? _lastTargetState = null;
         private string _lastHardwareResult = "";
@@ -869,15 +870,16 @@ namespace osu_TipToggle
                                 _unknownStatusStartMs = 0;
                             }
 
-                            if (status == OsuMemoryStatus.Playing && audioTime == 0 && _lastAudioTime < -50)
+                            if (status == OsuMemoryStatus.Playing && audioTime == 0 && _lastAudioTime < 0)
                             {
                                 audioTime = _lastAudioTime;
                             }
 
                             bool isInitialAttachToPlaying = (_lastOsuStatus == OsuMemoryStatus.Unknown && status == OsuMemoryStatus.Playing);
+                            bool isEnteringFromMenu = (_lastOsuStatus != OsuMemoryStatus.Playing && status == OsuMemoryStatus.Playing);
 
                             bool isMapRestart = (status == OsuMemoryStatus.Playing) &&
-                                                (!isInitialAttachToPlaying && _lastOsuStatus != OsuMemoryStatus.Playing ||
+                                                (!isInitialAttachToPlaying && isEnteringFromMenu ||
                                                  (_hasAudioStarted && (audioTime < (_lastAudioTime - 500) || (_lastAudioTime > 0 && audioTime <= 0))));
 
                             if (isInitialAttachToPlaying)
@@ -890,8 +892,9 @@ namespace osu_TipToggle
                             {
                                 _gameplayEnterMs = now;
                                 _frozenTicks = 0;
+                                _advancingTicks = 0;
                                 _hasAudioStarted = false;
-                                _lastAudioTime = audioTime;
+                                _lastAudioTime = isEnteringFromMenu ? int.MinValue : audioTime;
                             }
                             _lastOsuStatus = status;
 
@@ -905,12 +908,24 @@ namespace osu_TipToggle
 
                                 long elapsedFromEnter = now - _gameplayEnterMs;
 
-                                if (!_hasAudioStarted && _lastAudioTime != -1 && audioTime > _lastAudioTime)
+                                if (!_hasAudioStarted)
                                 {
-                                    _hasAudioStarted = true;
+                                    int delta = audioTime - _lastAudioTime;
+                                    if (_lastAudioTime != int.MinValue && delta > 0 && delta < 120)
+                                    {
+                                        _advancingTicks++;
+                                        if (_advancingTicks >= 2)
+                                        {
+                                            _hasAudioStarted = true;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        _advancingTicks = 0;
+                                    }
                                 }
 
-                                if (!_hasAudioStarted && elapsedFromEnter < 600)
+                                if (!_hasAudioStarted)
                                 {
                                     audioTimeText = "Song timeline: Loading...";
                                 }
