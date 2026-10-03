@@ -4,7 +4,7 @@ Automatically toggles the **Pressure & Buttons** setting on Wacom tablets runnin
 
 <img width="1890" height="540" alt="wacom-comparison" src="https://github.com/user-attachments/assets/b284fec9-d390-4a68-8d35-683f6f5a51f2" />
 
-*Input consistency test on CTH-480 at 1000 Hz. Disabling the tip eliminates dropped packets / gaps.*
+> *Input consistency test on CTH-480 at 1000 Hz. Disabling the tip eliminates dropped packets / gaps.*
 
 ## The Problem
 
@@ -60,6 +60,7 @@ This tool bridges that gap by reading osu! state in real time:
 1. Flash your supported tablet with [shavit's custom firmware](https://files.shav.it/osu/tablet/).
 2. Download the latest `osu-TipToggle.exe` from the [Releases](https://github.com/lukecupr/osu-wacom-pen-toggle/releases) page.
 3. Launch the executable and start osu!. The tool will automatically hook the process and manage your tablet in the background.
+> **Tip:** You can launch the app directly minimized to the system tray by passing the -tray argument.
 
 ## Credits
 
