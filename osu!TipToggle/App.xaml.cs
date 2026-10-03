@@ -37,6 +37,26 @@ namespace osu_TipToggle
             }
 
             base.OnStartup(e);
+
+            bool startInTray = false;
+            foreach (var arg in e.Args)
+            {
+                if (arg.Equals("-tray", StringComparison.OrdinalIgnoreCase) ||
+                    arg.Equals("/tray", StringComparison.OrdinalIgnoreCase) ||
+                    arg.Equals("--tray", StringComparison.OrdinalIgnoreCase))
+                {
+                    startInTray = true;
+                    break;
+                }
+            }
+
+            var mainWindow = new MainWindow(startInTray);
+            MainWindow = mainWindow;
+
+            if (!startInTray)
+            {
+                mainWindow.Show();
+            }
         }
 
         protected override void OnExit(ExitEventArgs e)

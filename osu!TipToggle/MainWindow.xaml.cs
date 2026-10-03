@@ -188,6 +188,8 @@ namespace osu_TipToggle
         private const uint NIF_ICON = 0x00000002;
         private const uint NIF_TIP = 0x00000004;
 
+        private const int WM_SYSCOMMAND = 0x0112;
+        private const int SC_RESTORE = 0xF120;
         private const int WM_DEVICECHANGE = 0x0219;
         private const int WM_TRAYICON = 0x8000 + 100;
         private const int WM_LBUTTONUP = 0x0202;
@@ -207,7 +209,11 @@ namespace osu_TipToggle
 
         #endregion
 
-        public MainWindow()
+        public MainWindow() : this(false)
+        {
+        }
+
+        public MainWindow(bool startInTray)
         {
             InitializeComponent();
 
@@ -219,8 +225,19 @@ namespace osu_TipToggle
             _baseAddresses = new OsuBaseAddresses();
 
             SourceInitialized += MainWindow_SourceInitialized;
-            Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
+
+            if (startInTray)
+            {
+                var helper = new WindowInteropHelper(this);
+                helper.EnsureHandle();
+                HideToTray();
+                StartBackgroundTasks();
+            }
+            else
+            {
+                Loaded += MainWindow_Loaded;
+            }
         }
 
         private static string GetAppVersion()
@@ -252,23 +269,29 @@ namespace osu_TipToggle
             {
                 HideToTray();
             }
+            else if (WindowState == WindowState.Normal && _isTrayIconActive)
+            {
+                RestoreFromTray();
+            }
         }
 
         private void HideToTray()
         {
             AddTrayIcon();
+            ShowInTaskbar = false;
             Hide();
         }
 
         public void RestoreFromTray()
         {
+            RemoveTrayIcon();
+            ShowInTaskbar = true;
             Show();
             WindowState = WindowState.Normal;
             Activate();
             Topmost = true;
             Topmost = false;
             Focus();
-            RemoveTrayIcon();
             _lastUiAudioText = "";
             _lastUiTabletInfo = "";
         }
@@ -376,6 +399,16 @@ namespace osu_TipToggle
 
         private IntPtr HwndMessageHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            if (msg == WM_SYSCOMMAND && (wParam.ToInt32() & 0xFFF0) == SC_RESTORE)
+            {
+                if (_isTrayIconActive)
+                {
+                    RestoreFromTray();
+                    handled = true;
+                    return IntPtr.Zero;
+                }
+            }
+
             // Re-scan HID devices when hardware is plugged or unplugged
             if (msg == WM_DEVICECHANGE)
             {
@@ -465,6 +498,13 @@ namespace osu_TipToggle
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            StartBackgroundTasks();
+        }
+
+        private void StartBackgroundTasks()
+        {
+            if (_monitorTask != null) return;
+
             _cts = new CancellationTokenSource();
 
             try
@@ -1158,7 +1198,7 @@ namespace osu_TipToggle
                                     if (shouldUpdateTablet)
                                     {
                                         TxtDetectedTablet.Text = capturedTablet.Equals("Not Found", StringComparison.OrdinalIgnoreCase)
-                                            ? "Connect device"
+                                            ? "Connect supported device"
                                             : $"Device: {capturedTablet}";
                                     }
                                 }
