@@ -250,7 +250,7 @@ namespace osu_TipToggle
             }
 
             var ver = asm.GetName().Version;
-            return ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "0.1.0";
+            return ver != null ? $"{ver.Major}.{ver.Minor}.{ver.Build}" : "0.1.1";
         }
 
         private void MainWindow_SourceInitialized(object? sender, EventArgs e)
