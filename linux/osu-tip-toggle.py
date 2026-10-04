@@ -45,7 +45,11 @@ MODELS = [
 class TabletController:
     def __init__(self):
         self.fds = []
-        self.model = None
+        self.tablet_configs = {} # fd -> (report_id, report_len, write_offset)
+
+    def get_write_offset(self, report_id):
+        # According to Windows C# tool, report 96 uses offset 3, report 36 uses offset 1
+        return 3 if report_id == 96 else 1
 
     def open_device(self):
         found = False
@@ -58,17 +62,43 @@ class TabletController:
             
             try:
                 fd = os.open(path, os.O_RDWR)
-                buf = bytearray(32)
-                buf[0] = 0x24 # Report ID
+                
+                # Probe Report 36 (0x24) - CTL-472/480/680
+                buf_36 = bytearray(32)
+                buf_36[0] = 36
+                is_valid = False
+                report_id = 36
+                report_len = 32
+                
                 try:
-                    fcntl.ioctl(fd, HIDIOCGFEATURE, buf)
-                    if buf[1:4] == b'TV':
-                        self.fds.append(fd)
-                        print(f"[Wacom] Found shavit firmware interface at {path}")
-                        found = True
-                        continue
+                    fcntl.ioctl(fd, HIDIOCGFEATURE, buf_36)
+                    if buf_36[1:4] == b'TV':
+                        is_valid = True
                 except OSError:
                     pass
+                    
+                # Probe Report 96 (0x60) - CTL-4100/6100
+                if not is_valid:
+                    buf_96 = bytearray(64)
+                    buf_96[0] = 96
+                    try:
+                        # 0xC0404807 is HIDIOCGFEATURE for 64 bytes
+                        fcntl.ioctl(fd, 0xC0404807, buf_96)
+                        if buf_96[1:4] == b'TV':
+                            is_valid = True
+                            report_id = 96
+                            report_len = 64
+                    except OSError:
+                        pass
+                
+                if is_valid:
+                    self.fds.append(fd)
+                    write_offset = self.get_write_offset(report_id)
+                    self.tablet_configs[fd] = (report_id, report_len, write_offset)
+                    print(f"[Wacom] Found shavit firmware interface at {path} (Report {report_id})")
+                    found = True
+                    continue
+                    
                 os.close(fd)
             except OSError:
                 pass
@@ -82,31 +112,39 @@ class TabletController:
         import fcntl
         for fd in self.fds:
             try:
-                buf = bytearray(32)
-                buf[0] = 0x24
-                fcntl.ioctl(fd, HIDIOCGFEATURE, buf)
+                report_id, report_len, write_offset = self.tablet_configs[fd]
+                
+                buf = bytearray(report_len)
+                buf[0] = report_id
+                
+                # ioctl cmd: _IOC_READ|_IOC_WRITE (0xC0000000) | (len << 16) | ('H' << 8) | 0x07
+                GET_CMD = 0xC0004807 | (report_len << 16)
+                SET_CMD = 0xC0004806 | (report_len << 16)
+                
+                fcntl.ioctl(fd, GET_CMD, buf)
                 
                 if buf[1:4] != b'TV':
                     continue
                     
-                # Create a fresh buffer to write to avoid sending back read-only data
-                write_buf = bytearray(32)
-                write_buf[0] = 0x24
-                write_buf[1] = ord('T')
-                write_buf[2] = ord('V')
-                write_buf[3] = 1
+                write_buf = bytearray(report_len)
+                write_buf[0] = report_id
+                
+                offset = write_offset
+                write_buf[offset] = ord('T')
+                write_buf[offset + 1] = ord('V')
+                write_buf[offset + 2] = 1
                 # Copy configs
-                write_buf[4] = buf[4]
-                write_buf[5] = buf[5]
+                write_buf[offset + 3] = buf[4]
+                write_buf[offset + 4] = buf[5]
                 # Tip/Pressure flag (0 = disabled, 1 = enabled)
-                write_buf[6] = 1 if enable else 0
+                write_buf[offset + 5] = 1 if enable else 0
                 
-                # Motion sync logic identical to C# SetPressureAndButtons
+                # Motion sync logic
                 motion_sync_supported = (buf[7] & 4) != 0
-                write_buf[7] = buf[8] if motion_sync_supported else 0
-                write_buf[8] = 0
+                write_buf[offset + 6] = buf[8] if motion_sync_supported else 0
+                write_buf[offset + 7] = 0
                 
-                fcntl.ioctl(fd, HIDIOCSFEATURE, write_buf)
+                fcntl.ioctl(fd, SET_CMD, write_buf)
                 success = True
             except OSError:
                 pass
