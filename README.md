@@ -60,7 +60,7 @@ This tool bridges that gap by reading osu! state in real time:
 1. Flash your supported tablet with [shavit's custom firmware](https://files.shav.it/osu/tablet/).
 2. Download the latest `osu-TipToggle.exe` from the [Releases](https://github.com/lukecupr/osu-wacom-pen-toggle/releases) page.
 3. Launch the executable and start osu!. The tool will automatically hook the process and manage your tablet in the background.
-> **Tip:** You can launch the app directly minimized to the system tray by passing the -tray argument.
+> **Tip:** You can launch the app minimized to the system tray by passing the -tray argument.
 
 ## Credits
 
