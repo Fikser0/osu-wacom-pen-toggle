@@ -229,10 +229,16 @@ class LazerTitleWatcher:
         self.method = self.detect_method()
 
     def detect_method(self):
+        import os
         if shutil.which("hyprctl"):
             return "hyprland"
         if shutil.which("swaymsg"):
             return "sway"
+        if shutil.which("kdotool"):
+            return "kde"
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+        if "GNOME" in desktop and shutil.which("gdbus"):
+            return "gnome"
         if shutil.which("xprop"):
             return "x11"
         return None
@@ -246,6 +252,7 @@ class LazerTitleWatcher:
                 )
                 stdout, _ = await proc.communicate()
                 if stdout:
+                    import json
                     data = json.loads(stdout)
                     return data.get("class", ""), data.get("title", "")
             elif self.method == "sway":
@@ -255,8 +262,27 @@ class LazerTitleWatcher:
                 )
                 stdout, _ = await proc.communicate()
                 if stdout:
-                    # Very naive parsing for sway
                     return "osu", stdout.decode('utf-8')
+            elif self.method == "kde":
+                proc = await asyncio.create_subprocess_exec(
+                    "kdotool", "getactivewindow", "getwindowname",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await proc.communicate()
+                if stdout:
+                    return "osu", stdout.decode('utf-8').strip()
+            elif self.method == "gnome":
+                script = "global.get_window_actors().find(w=>w.meta_window.has_focus()!==false)?.meta_window.get_title()"
+                proc = await asyncio.create_subprocess_exec(
+                    "gdbus", "call", "--session", "--dest", "org.gnome.Shell",
+                    "--object-path", "/org/gnome/Shell", "--method", "org.gnome.Shell.Eval", script,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await proc.communicate()
+                out_str = stdout.decode('utf-8').strip()
+                if out_str and out_str.startswith("(true,"):
+                    title = out_str.split("'", 1)[1].rsplit("'", 1)[0]
+                    return "osu", title
             elif self.method == "x11":
                 proc1 = await asyncio.create_subprocess_shell(
                     "xprop -root _NET_ACTIVE_WINDOW",

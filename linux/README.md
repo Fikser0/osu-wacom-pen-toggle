@@ -23,3 +23,11 @@ Run the script before playing:
 ./osu-tip-toggle.py
 ```
 It runs in the foreground. Press `Ctrl+C` when done, and it will safely re-enable the pen tip before exiting.
+
+### Desktop Environment Support
+
+- **Hyprland**: Supported natively via `hyprctl`.
+- **Sway**: Supported natively via `swaymsg`.
+- **X11**: Supported via `xprop` (install using your package manager, e.g., `sudo pacman -S xorg-xprop`).
+- **KDE Plasma (Wayland)**: Supported via `kdotool`. Install via `sudo pacman -S kdotool`.
+- **GNOME (Wayland)**: GNOME enforces strict security isolating window titles. To support GNOME Wayland, you **must** install a GNOME Shell extension that re-enables `org.gnome.Shell.Eval` (such as the `Eval-Gjs` extension) to allow `gdbus` queries. Alternatively, use X11.
