@@ -234,6 +234,8 @@ class LazerTitleWatcher:
             return "hyprland"
         if shutil.which("swaymsg"):
             return "sway"
+        if shutil.which("i3-msg"):
+            return "i3"
         if shutil.which("kdotool"):
             return "kde"
         desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
@@ -263,6 +265,28 @@ class LazerTitleWatcher:
                 stdout, _ = await proc.communicate()
                 if stdout:
                     return "osu", stdout.decode('utf-8')
+            elif self.method == "i3":
+                proc = await asyncio.create_subprocess_exec(
+                    "i3-msg", "-t", "get_tree",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await proc.communicate()
+                if stdout:
+                    try:
+                        import json
+                        tree = json.loads(stdout)
+                        def find_focused(node):
+                            if node.get("focused"): return node
+                            for child in node.get("nodes", []) + node.get("floating_nodes", []):
+                                res = find_focused(child)
+                                if res: return res
+                            return None
+                        f = find_focused(tree)
+                        if f:
+                            props = f.get("window_properties", {})
+                            return props.get("class", ""), f.get("name", "")
+                    except Exception:
+                        pass
             elif self.method == "kde":
                 proc = await asyncio.create_subprocess_exec(
                     "kdotool", "getactivewindow", "getwindowname",
