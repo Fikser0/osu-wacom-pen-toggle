@@ -55,3 +55,11 @@ kill $TIP_PID 2>/dev/null
 ```
 
 Make it executable (`chmod +x osu-wrapper.sh`) and use it to launch your game!
+
+### Desktop Launcher Integration
+
+If you want the script to run automatically when you click the osu! icon in your desktop's application menu:
+1. Locate your osu! `.desktop` file (usually in `~/.local/share/applications/` or `/usr/share/applications/`).
+2. Open it in a text editor and find the `Exec=` line.
+3. Change it to point to your new wrapper script. For example: `Exec=/path/to/osu-wrapper.sh`
+4. Now, launching the game from your standard desktop menu will automatically trigger the wrapper!
