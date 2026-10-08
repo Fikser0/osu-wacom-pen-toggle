@@ -42,8 +42,11 @@ Create a new file (e.g., `~/.local/bin/launch-osu.sh`) and add the following cod
 ```bash
 #!/usr/bin/env bash
 
+# Check if OpenTabletDriver was already active before launching
+was_active=$(systemctl --user is-active opentabletdriver.service 2>/dev/null)
+
 # Start the toggle script in the background
-# (The --ensure-otd flag automatically stops and seamlessly restarts OpenTabletDriver to grab the tablet)
+# (The --ensure-otd flag seamlessly stops and restarts OpenTabletDriver to grab the tablet)
 /path/to/osu-tip-toggle.py --ensure-otd >/dev/null 2>&1 &
 TIP_PID=$!
 
@@ -53,6 +56,11 @@ osu-lazer "$@"
 
 # Kill the toggle script when osu! closes
 kill $TIP_PID 2>/dev/null
+
+# If the driver wasn't active prior to launching, stop it
+if [ "$was_active" != "active" ]; then
+    systemctl --user stop opentabletdriver.service
+fi
 ```
 Make the script executable: `chmod +x ~/.local/bin/launch-osu.sh`
 
