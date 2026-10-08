@@ -327,18 +327,64 @@ class LazerTitleWatcher:
             pass
         return "", ""
 
+    def _update_state(self, win_class, win_title):
+        if "osu" in win_class.lower() or "osu" in win_title.lower():
+            is_playing = " - " in win_title or " – " in win_title
+            self.log_tailer._set_state(not is_playing)
+
+    async def _poll(self):
+        while True:
+            await asyncio.sleep(0.1)
+            win_class, win_title = await self.get_window_info()
+            self._update_state(win_class, win_title)
+
     async def watch(self):
         if not self.method:
             return
             
         print(f"[LazerTitleWatcher] Using {self.method} for window title detection (pauses).")
-        while True:
-            await asyncio.sleep(0.1)
+        
+        if self.method in ("i3", "sway"):
+            cmd = "i3-msg" if self.method == "i3" else "swaymsg"
+            proc = await asyncio.create_subprocess_exec(
+                cmd, "-t", "subscribe", "-m", '["window"]',
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            )
+            # Fetch once initially
             win_class, win_title = await self.get_window_info()
-            
-            if "osu" in win_class.lower() or "osu" in win_title.lower():
-                is_playing = " - " in win_title or " – " in win_title
-                self.log_tailer._set_state(not is_playing)
+            self._update_state(win_class, win_title)
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                win_class, win_title = await self.get_window_info()
+                self._update_state(win_class, win_title)
+        elif self.method == "hyprland":
+            import os
+            import shutil
+            sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+            if sig and shutil.which("socat"):
+                sock = f"{os.environ.get('XDG_RUNTIME_DIR', '/run/user/1000')}/hypr/{sig}/.socket2.sock"
+                proc = await asyncio.create_subprocess_exec(
+                    "socat", "-U", "-", f"UNIX-CONNECT:{sock}",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                )
+                # Fetch once initially
+                win_class, win_title = await self.get_window_info()
+                self._update_state(win_class, win_title)
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    line_str = line.decode('utf-8').strip()
+                    if line_str.startswith("activewindow>>"):
+                        parts = line_str.split(">>")[1].split(",", 1)
+                        if len(parts) == 2:
+                            self._update_state(parts[0], parts[1])
+            else:
+                await self._poll()
+        else:
+            await self._poll()
 
 class TosuWatcher:
     def __init__(self, tablet_ctrl):
@@ -420,7 +466,7 @@ async def main(args):
         if res.stdout.strip() == "active":
             print("[Daemon] Temporarily stopping OpenTabletDriver to claim device...")
             subprocess.run(["systemctl", "--user", "stop", "opentabletdriver.service"])
-            time.sleep(1.5) # Give udev time to recreate /dev/hidraw nodes
+            await asyncio.sleep(1.5) # Give udev time to recreate /dev/hidraw nodes
             otd_was_active = True
     except Exception:
         pass
