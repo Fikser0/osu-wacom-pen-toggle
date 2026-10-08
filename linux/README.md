@@ -32,34 +32,33 @@ It runs in the foreground. Press `Ctrl+C` when done, and it will safely re-enabl
 - **KDE Plasma (Wayland)**: Supported via `kdotool`. Install via `sudo pacman -S kdotool`.
 - **GNOME (Wayland)**: GNOME enforces strict security isolating window titles. To support GNOME Wayland, you **must** install a GNOME Shell extension that re-enables `org.gnome.Shell.Eval` (such as the `Eval-Gjs` extension) to allow `gdbus` queries. Alternatively, use X11.
 
-### Automatic Startup (Wrapper Script)
+### Automatic Desktop Launcher Integration
 
-You can create a wrapper script to automatically launch the daemon in the background when you start osu!, and safely kill it when you close the game. This also integrates smoothly with OpenTabletDriver if you use it.
+You can easily configure your desktop so that clicking your regular osu! icon automatically starts this daemon in the background and cleans it up when you exit the game. It also integrates flawlessly with OpenTabletDriver.
 
-Create a file (e.g. `osu-wrapper.sh`) and add the following:
+**1. Create a launch script**
+Create a new file (e.g., `~/.local/bin/launch-osu.sh`) and add the following code:
 
 ```bash
 #!/usr/bin/env bash
 
-# 1. Start the toggle script in the background
+# Start the toggle script in the background
 # (The --ensure-otd flag automatically stops and seamlessly restarts OpenTabletDriver to grab the tablet)
 /path/to/osu-tip-toggle.py --ensure-otd >/dev/null 2>&1 &
 TIP_PID=$!
 
-# 2. Run your actual osu! command
+# Run your actual osu! command
 # Replace this line with how you normally launch osu! (e.g., /path/to/osu.AppImage)
 osu-lazer "$@"
 
-# 3. Kill the toggle script when osu! closes
+# Kill the toggle script when osu! closes
 kill $TIP_PID 2>/dev/null
 ```
+Make the script executable: `chmod +x ~/.local/bin/launch-osu.sh`
 
-Make it executable (`chmod +x osu-wrapper.sh`) and use it to launch your game!
+**2. Update your desktop shortcut**
+Locate your osu! `.desktop` file (usually in `~/.local/share/applications/` or `/usr/share/applications/`). 
+Open it in a text editor, find the `Exec=` line, and change it to point to your new script:
+`Exec=/home/YOUR_USERNAME/.local/bin/launch-osu.sh`
 
-### Desktop Launcher Integration
-
-If you want the script to run automatically when you click the osu! icon in your desktop's application menu:
-1. Locate your osu! `.desktop` file (usually in `~/.local/share/applications/` or `/usr/share/applications/`).
-2. Open it in a text editor and find the `Exec=` line.
-3. Change it to point to your new wrapper script. For example: `Exec=/path/to/osu-wrapper.sh`
-4. Now, launching the game from your standard desktop menu will automatically trigger the wrapper!
+Now, just launch the game from your application menu like normal!
