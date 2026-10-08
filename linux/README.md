@@ -31,3 +31,27 @@ It runs in the foreground. Press `Ctrl+C` when done, and it will safely re-enabl
 - **X11**: Supported via `xprop` (install using your package manager, e.g., `sudo pacman -S xorg-xprop`).
 - **KDE Plasma (Wayland)**: Supported via `kdotool`. Install via `sudo pacman -S kdotool`.
 - **GNOME (Wayland)**: GNOME enforces strict security isolating window titles. To support GNOME Wayland, you **must** install a GNOME Shell extension that re-enables `org.gnome.Shell.Eval` (such as the `Eval-Gjs` extension) to allow `gdbus` queries. Alternatively, use X11.
+
+### Automatic Startup (Wrapper Script)
+
+You can create a wrapper script to automatically launch the daemon in the background when you start osu!, and safely kill it when you close the game. This also integrates smoothly with OpenTabletDriver if you use it.
+
+Create a file (e.g. `osu-wrapper.sh`) and add the following:
+
+```bash
+#!/usr/bin/env bash
+
+# 1. Start the toggle script in the background
+# (The --ensure-otd flag automatically stops and seamlessly restarts OpenTabletDriver to grab the tablet)
+/path/to/osu-tip-toggle.py --ensure-otd >/dev/null 2>&1 &
+TIP_PID=$!
+
+# 2. Run your actual osu! command
+# Replace this line with how you normally launch osu! (e.g., /path/to/osu.AppImage)
+osu-lazer "$@"
+
+# 3. Kill the toggle script when osu! closes
+kill $TIP_PID 2>/dev/null
+```
+
+Make it executable (`chmod +x osu-wrapper.sh`) and use it to launch your game!
