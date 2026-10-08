@@ -32,41 +32,51 @@ It runs in the foreground. Press `Ctrl+C` when done, and it will safely re-enabl
 - **KDE Plasma (Wayland)**: Supported via `kdotool`. Install via `sudo pacman -S kdotool`.
 - **GNOME (Wayland)**: GNOME enforces strict security isolating window titles. To support GNOME Wayland, you **must** install a GNOME Shell extension that re-enables `org.gnome.Shell.Eval` (such as the `Eval-Gjs` extension) to allow `gdbus` queries. Alternatively, use X11.
 
-### Automatic Desktop Launcher Integration
+### Automatic Desktop Launcher Integration (Wrapper Script)
 
-You can easily configure your desktop so that clicking your regular osu! icon automatically starts this daemon in the background and cleans it up when you exit the game. It also integrates flawlessly with OpenTabletDriver.
+This is the recommended setup. It only runs the script while the game is open (0% background CPU) and automatically starts/stops OpenTabletDriver for you.
 
-**1. Create a launch script**
-Create a new file (e.g., `~/.local/bin/launch-osu.sh`) and add the following code:
+**1. Find your current osu! launch command:**
+Open terminal and find your osu! shortcut:
+```bash
+find ~/.local/share/applications /usr/share/applications -iname "*osu*.desktop"
+```
+Open the file it finds (e.g. `nano ~/.local/share/applications/osu-lazer.desktop`). Find the `Exec=` line and copy the command.
 
+**2. Create the wrapper script:**
+```bash
+mkdir -p ~/.local/bin
+nano ~/.local/bin/launch-osu.sh
+```
+Paste this inside. **Important:** Update the two marked lines!
 ```bash
 #!/usr/bin/env bash
 
-# Check if OpenTabletDriver was already active before launching
+# Check if OpenTabletDriver was active
 was_active=$(systemctl --user is-active opentabletdriver.service 2>/dev/null)
 
-# Start the toggle script in the background
-# (The --ensure-otd flag seamlessly stops and restarts OpenTabletDriver to grab the tablet)
-/path/to/osu-tip-toggle.py --ensure-otd >/dev/null 2>&1 &
+# 1. CHANGE THIS to where you cloned this repository:
+/home/YOUR_USERNAME/osu-wacom-pen-toggle/osu-tip-toggle.py --ensure-otd >/dev/null 2>&1 &
 TIP_PID=$!
 
-# Run your actual osu! command
-# Replace this line with how you normally launch osu! (e.g., /path/to/osu.AppImage)
-osu-lazer "$@"
+# 2. CHANGE THIS to the original Exec= command you found in step 1 (without "Exec="):
+/usr/bin/osu-lazer "$@"
 
-# Kill the toggle script when osu! closes
+# Cleanup after game closes
 kill $TIP_PID 2>/dev/null
-
-# If the driver wasn't active prior to launching, stop it
 if [ "$was_active" != "active" ]; then
     systemctl --user stop opentabletdriver.service
 fi
 ```
-Make the script executable: `chmod +x ~/.local/bin/launch-osu.sh`
+Make it executable:
+```bash
+chmod +x ~/.local/bin/launch-osu.sh
+```
 
-**2. Update your desktop shortcut**
-Locate your osu! `.desktop` file (usually in `~/.local/share/applications/` or `/usr/share/applications/`). 
-Open it in a text editor, find the `Exec=` line, and change it to point to your new script:
-`Exec=/home/YOUR_USERNAME/.local/bin/launch-osu.sh`
-
-Now, just launch the game from your application menu like normal!
+**3. Update your desktop shortcut:**
+Go back to your `.desktop` file from Step 1.
+Replace the **entire** `Exec=` line with your new wrapper script (keep `%U` if it had one):
+```ini
+Exec=/home/YOUR_USERNAME/.local/bin/launch-osu.sh %U
+```
+Now just launch the game from your application menu!
