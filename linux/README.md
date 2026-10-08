@@ -15,7 +15,7 @@ Requires a Wacom tablet with [shavit's custom firmware](https://files.shav.it/os
    ```bash
    sudo ./osu-tip-toggle.py --install-udev
    ```
-2. *(Optional)* **tosu**: For `osu! stable` support, the script requires the `websockets` Python package (`pip install websockets` or `pacman -S python-websockets`) and the [tosu](https://github.com/ppy/osu/releases) or [gosumemory](https://github.com/l3lackShark/gosumemory) bridge.
+2. *(Optional)* **tosu**: For `osu! stable` support, the script requires the `websockets` Python package (`pip install websockets` or `pacman -S python-websockets`) and the [tosu](https://github.com/tosuapp/tosu) or [gosumemory](https://github.com/l3lackShark/gosumemory) bridge.
 
 ## Usage
 Run the script before playing:
