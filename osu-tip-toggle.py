@@ -386,6 +386,36 @@ class LazerTitleWatcher:
         else:
             await self._poll()
 
+def ensure_tosu_headless(tosu_path):
+    """Make sure tosu.env sets OPEN_DASHBOARD_ON_STARTUP=false so tosu never opens a browser."""
+    cfg_dirs = [
+        os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "tosu"),
+        os.path.dirname(os.path.abspath(tosu_path)),
+    ]
+    for d in cfg_dirs:
+        env_file = os.path.join(d, "tosu.env")
+        if d == cfg_dirs[0]:
+            os.makedirs(d, exist_ok=True)
+        if not os.path.isdir(d) or (d != cfg_dirs[0] and not os.path.exists(env_file)):
+            continue
+        try:
+            lines = open(env_file).read().splitlines() if os.path.exists(env_file) else []
+            out, found = [], False
+            for ln in lines:
+                if ln.strip().startswith("OPEN_DASHBOARD_ON_STARTUP"):
+                    found = True
+                    ln = "OPEN_DASHBOARD_ON_STARTUP=false"
+                out.append(ln)
+            if not found:
+                out.append("OPEN_DASHBOARD_ON_STARTUP=false")
+            new = "\n".join(out) + "\n"
+            if not os.path.exists(env_file) or open(env_file).read() != new:
+                with open(env_file, "w") as f:
+                    f.write(new)
+        except OSError as e:
+            print(f"[Daemon] Could not update {env_file}: {e}")
+
+
 class TosuWatcher:
     def __init__(self, tablet_ctrl):
         self.tablet = tablet_ctrl
@@ -516,7 +546,11 @@ async def main(args):
         if os.path.exists(tosu_path) and os.access(tosu_path, os.X_OK):
             try:
                 print(f"[Daemon] Auto-starting tosu: {tosu_path}")
-                tosu_process = subprocess.Popen([tosu_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ensure_tosu_headless(tosu_path)
+                tosu_env = os.environ.copy()
+                tosu_env["OPEN_DASHBOARD_ON_STARTUP"] = "false"
+                tosu_env["BROWSER"] = "true"  # xdg-open fallback: no-op browser
+                tosu_process = subprocess.Popen([tosu_path], env=tosu_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception as e:
                 print(f"[Daemon] Failed to start tosu: {e}")
                 

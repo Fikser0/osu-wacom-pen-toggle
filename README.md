@@ -15,7 +15,7 @@ Requires a Wacom tablet with [shavit's custom firmware](https://files.shav.it/os
    ```bash
    sudo ./osu-tip-toggle.py --install-udev
    ```
-2. *(Optional)* **tosu**: For `osu! stable` support, the script requires the `websockets` Python package (`pip install websockets` or `pacman -S python-websockets`) and the [tosu](https://github.com/tosuapp/tosu) or [gosumemory](https://github.com/l3lackShark/gosumemory) bridge.
+2. *(Optional)* **tosu**: For `osu! stable` support, the script requires the `websockets` Python package (`pip install websockets` or `pacman -S python-websockets`) and the [tosu](https://github.com/tosuapp/tosu) or [gosumemory](https://github.com/l3lackShark/gosumemory) bridge. When the `tosu` binary sits next to the script (or `--tosu-path` is given), the daemon auto-starts it in the background **without opening the dashboard in a browser** (forces `OPEN_DASHBOARD_ON_STARTUP=false` in `~/.config/tosu/tosu.env`, passes it via env, and sets `BROWSER=true`).
 
 ## Usage
 Run the script before playing:
