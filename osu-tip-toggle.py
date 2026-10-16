@@ -73,7 +73,7 @@ class TabletController:
                 
                 try:
                     fcntl.ioctl(fd, HIDIOCGFEATURE, buf_36)
-                    if buf_36[1:4] == b'TV ':
+                    if buf_36[1:4] == b'TV\x01':
                         is_valid = True
                 except OSError:
                     pass
@@ -85,7 +85,7 @@ class TabletController:
                     try:
                         # 0xC0404807 is HIDIOCGFEATURE for 64 bytes
                         fcntl.ioctl(fd, 0xC0404807, buf_96)
-                        if buf_96[1:4] == b'TV ':
+                        if buf_96[1:4] == b'TV\x01':
                             is_valid = True
                             report_id = 96
                             report_len = 64
@@ -125,7 +125,7 @@ class TabletController:
                 
                 fcntl.ioctl(fd, GET_CMD, buf)
                 
-                if buf[1:4] != b'TV ':
+                if buf[1:4] != b'TV\x01':
                     continue
                     
                 write_buf = bytearray(report_len)
