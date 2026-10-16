@@ -188,35 +188,41 @@ class LogTailer:
     async def tail(self):
         f = None
         inode = None
+        last_scan = 0.0
         
         while True:
-            latest = self.find_latest_log()
-            
-            if latest and latest != self.current_log_path:
-                print(f"[LogTailer] Tailing {latest}")
-                self.current_log_path = latest
-                if f:
-                    f.close()
-                f = open(latest, 'r', encoding='utf-8', errors='ignore')
-                inode = os.fstat(f.fileno()).st_ino
-                f.seek(0, 2)
-                self._set_state(True)
+            now = time.monotonic()
+            if f is None or (now - last_scan) >= 3.0:
+                last_scan = now
+                latest = self.find_latest_log()
+                if latest and latest != self.current_log_path:
+                    print(f"[LogTailer] Tailing {latest}")
+                    self.current_log_path = latest
+                    if f:
+                        f.close()
+                    f = open(latest, 'r', encoding='utf-8', errors='ignore')
+                    inode = os.fstat(f.fileno()).st_ino
+                    f.seek(0, 2)
+                    self._set_state(True)
                 
             if f is None:
                 await asyncio.sleep(1)
                 continue
                 
-            try:
-                current_st = os.stat(self.current_log_path)
-                if current_st.st_ino != inode:
-                    self.current_log_path = None
-                    continue
-            except OSError:
-                self.current_log_path = None
-                continue
-                
             line = f.readline()
             if not line:
+                try:
+                    current_st = os.stat(self.current_log_path)
+                    if current_st.st_ino != inode:
+                        self.current_log_path = None
+                        f.close()
+                        f = None
+                        continue
+                except OSError:
+                    self.current_log_path = None
+                    f.close()
+                    f = None
+                    continue
                 await asyncio.sleep(0.05)
                 continue
                 
@@ -334,7 +340,7 @@ class LazerTitleWatcher:
 
     async def _poll(self):
         while True:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             win_class, win_title = await self.get_window_info()
             self._update_state(win_class, win_title)
 
@@ -360,29 +366,34 @@ class LazerTitleWatcher:
                 win_class, win_title = await self.get_window_info()
                 self._update_state(win_class, win_title)
         elif self.method == "hyprland":
-            import os
-            import shutil
             sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
-            if sig and shutil.which("socat"):
-                sock = f"{os.environ.get('XDG_RUNTIME_DIR', '/run/user/1000')}/hypr/{sig}/.socket2.sock"
-                proc = await asyncio.create_subprocess_exec(
-                    "socat", "-U", "-", f"UNIX-CONNECT:{sock}",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
-                )
-                # Fetch once initially
-                win_class, win_title = await self.get_window_info()
-                self._update_state(win_class, win_title)
-                while True:
-                    line = await proc.stdout.readline()
-                    if not line:
-                        break
-                    line_str = line.decode('utf-8').strip()
-                    if line_str.startswith("activewindow>>"):
-                        parts = line_str.split(">>")[1].split(",", 1)
-                        if len(parts) == 2:
-                            self._update_state(parts[0], parts[1])
-            else:
-                await self._poll()
+            xdg_run = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+            candidates = [
+                f"{xdg_run}/hypr/{sig}/.socket2.sock",
+                f"/tmp/hypr/{sig}/.socket2.sock",
+            ] if sig else []
+            sock = next((p for p in candidates if os.path.exists(p)), None)
+            if sock:
+                try:
+                    reader, writer = await asyncio.open_unix_connection(sock)
+                    win_class, win_title = await self.get_window_info()
+                    self._update_state(win_class, win_title)
+                    try:
+                        while True:
+                            line = await reader.readline()
+                            if not line:
+                                break
+                            line_str = line.decode('utf-8', errors='ignore').strip()
+                            if line_str.startswith("activewindow>>"):
+                                parts = line_str.split(">>", 1)[1].split(",", 1)
+                                if len(parts) == 2:
+                                    self._update_state(parts[0], parts[1])
+                    finally:
+                        writer.close()
+                    return
+                except Exception:
+                    pass
+            await self._poll()
         else:
             await self._poll()
 
@@ -541,7 +552,7 @@ async def main(args):
     if title_watcher.method:
         tasks.append(asyncio.create_task(title_watcher.watch()))
     
-    if HAS_WEBSOCKETS:
+    if HAS_WEBSOCKETS and not args.lazer_only:
         tosu_path = args.tosu_path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tosu")
         if os.path.exists(tosu_path) and os.access(tosu_path, os.X_OK):
             try:
@@ -556,7 +567,7 @@ async def main(args):
                 
         tosu_watcher = TosuWatcher(tablet)
         tasks.append(asyncio.create_task(tosu_watcher.watch()))
-    else:
+    elif not args.lazer_only:
         print("[TosuWatcher] python-websockets not installed. osu! stable detection disabled.")
         
     try:
@@ -570,6 +581,7 @@ if __name__ == "__main__":
     parser.add_argument("--install-udev", action="store_true", help="Install udev rules and exit")
     parser.add_argument("--tosu-path", type=str, help="Path to custom tosu binary for osu! stable")
     parser.add_argument("--ensure-otd", action="store_true", help="Always ensure OTD is running after grabbing tablet")
+    parser.add_argument("--lazer-only", action="store_true", help="Disable tosu watcher (osu!lazer only)")
     args = parser.parse_args()
 
     try:

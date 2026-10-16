@@ -24,10 +24,16 @@ Run the script before playing:
 ```
 It runs in the foreground. Press `Ctrl+C` when done, and it will safely re-enable the pen tip before exiting.
 
+### Command-Line Flags
+- `--install-udev`: Install `/etc/udev/rules.d/99-wacom-osu.rules` for `/dev/hidraw*` access and exit (requires `sudo`).
+- `--ensure-otd`: Ensure `opentabletdriver.service` is started after claiming the tablet's `hidraw` interface.
+- `--lazer-only`: Disable the `tosu` WebSocket watcher loop when exclusively playing `osu!lazer` (eliminates background WebSocket polling overhead).
+- `--tosu-path <PATH>`: Specify a custom path to the `tosu` binary for `osu!stable`.
+
 ### Desktop Environment Support
 
-- **Hyprland**: Supported natively via `hyprctl`.
-- **Sway**: Supported natively via `swaymsg`.
+- **Hyprland**: Supported natively via Python `asyncio` Unix domain socket subscription to `.socket2.sock` (zero subprocess polling overhead; no external `socat` binary required) and `hyprctl`.
+- **Sway / i3**: Supported natively via `swaymsg` / `i3-msg` event subscription.
 - **X11**: Supported via `xprop` (install using your package manager, e.g., `sudo pacman -S xorg-xprop`).
 - **KDE Plasma (Wayland)**: Supported via `kdotool`. Install via `sudo pacman -S kdotool`.
 - **GNOME (Wayland)**: GNOME enforces strict security isolating window titles. To support GNOME Wayland, you **must** install a GNOME Shell extension that re-enables `org.gnome.Shell.Eval` (such as the `Eval-Gjs` extension) to allow `gdbus` queries. Alternatively, use X11.
@@ -55,18 +61,20 @@ Paste this inside. **Important:** Update the two marked lines!
 # Check if OpenTabletDriver was active
 was_active=$(systemctl --user is-active opentabletdriver.service 2>/dev/null)
 
-# 1. CHANGE THIS to where you cloned this repository:
-/home/YOUR_USERNAME/osu-wacom-pen-toggle/osu-tip-toggle.py --ensure-otd >/dev/null 2>&1 &
+# 1. CHANGE THIS to where you cloned this repository (use --lazer-only if only playing osu!lazer):
+/home/YOUR_USERNAME/osu-wacom-pen-toggle/osu-tip-toggle.py --ensure-otd --lazer-only >/dev/null 2>&1 &
 TIP_PID=$!
+
+cleanup() {
+    kill "$TIP_PID" 2>/dev/null
+    if [ "$was_active" != "active" ]; then
+        systemctl --user stop opentabletdriver.service
+    fi
+}
+trap cleanup EXIT
 
 # 2. CHANGE THIS to the original Exec= command you found in step 1 (without "Exec="):
 /usr/bin/osu-lazer "$@"
-
-# Cleanup after game closes
-kill $TIP_PID 2>/dev/null
-if [ "$was_active" != "active" ]; then
-    systemctl --user stop opentabletdriver.service
-fi
 ```
 Make it executable:
 ```bash
