@@ -46,6 +46,7 @@ class TabletController:
     def __init__(self):
         self.fds = []
         self.tablet_configs = {} # fd -> (report_id, report_len, write_offset)
+        self.tip_enabled = None
 
     def get_write_offset(self, report_id):
         # According to Windows C# tool, report 96 uses offset 3, report 36 uses offset 1
@@ -72,7 +73,7 @@ class TabletController:
                 
                 try:
                     fcntl.ioctl(fd, HIDIOCGFEATURE, buf_36)
-                    if buf_36[1:4] == b'TV':
+                    if buf_36[1:4] == b'TV ':
                         is_valid = True
                 except OSError:
                     pass
@@ -84,7 +85,7 @@ class TabletController:
                     try:
                         # 0xC0404807 is HIDIOCGFEATURE for 64 bytes
                         fcntl.ioctl(fd, 0xC0404807, buf_96)
-                        if buf_96[1:4] == b'TV':
+                        if buf_96[1:4] == b'TV ':
                             is_valid = True
                             report_id = 96
                             report_len = 64
@@ -105,6 +106,7 @@ class TabletController:
         return found
 
     def set_tip_enabled(self, enable):
+        self.tip_enabled = enable
         if not self.fds:
             return
         
@@ -123,7 +125,7 @@ class TabletController:
                 
                 fcntl.ioctl(fd, GET_CMD, buf)
                 
-                if buf[1:4] != b'TV':
+                if buf[1:4] != b'TV ':
                     continue
                     
                 write_buf = bytearray(report_len)
@@ -175,13 +177,24 @@ class LogTailer:
         return max(logs, key=os.path.getmtime)
 
     def handle_line(self, line):
-        if "entered SoloPlayer#" in line or "entered MultiplayerPlayer#" in line:
+        if (
+            "entered SoloPlayer#" in line
+            or "entered MultiplayerPlayer#" in line
+            or "GameplayClockContainer started via call to StartGameplayClock" in line
+        ):
             self._set_state(False)
-        elif "exit from SoloPlayer#" in line or "exit from MultiplayerPlayer#" in line or "resume to SoloSongSelect#" in line or "resume to MainMenu#" in line:
+        elif (
+            "GameplayClockContainer stopped via call to StopGameplayClock" in line
+            or "ResultsScreen#" in line
+            or "exit from SoloPlayer#" in line
+            or "exit from MultiplayerPlayer#" in line
+            or "resume to SoloSongSelect#" in line
+            or "resume to MainMenu#" in line
+        ):
             self._set_state(True)
 
     def _set_state(self, tip_enabled):
-        if tip_enabled != (not self.is_playing):
+        if tip_enabled != (not self.is_playing) or self.tablet.tip_enabled != tip_enabled:
             self.is_playing = not tip_enabled
             self.tablet.set_tip_enabled(tip_enabled)
 
@@ -233,6 +246,7 @@ class LazerTitleWatcher:
         self.tablet = tablet_ctrl
         self.log_tailer = log_tailer
         self.method = self.detect_method()
+        self.has_seen_playing_title = False
 
     def detect_method(self):
         import os
@@ -336,7 +350,12 @@ class LazerTitleWatcher:
     def _update_state(self, win_class, win_title):
         if "osu" in win_class.lower() or "osu" in win_title.lower():
             is_playing = " - " in win_title or " – " in win_title
-            self.log_tailer._set_state(not is_playing)
+            if is_playing:
+                self.has_seen_playing_title = True
+                self.log_tailer._set_state(False)
+            elif self.has_seen_playing_title:
+                self.has_seen_playing_title = False
+                self.log_tailer._set_state(True)
 
     async def _poll(self):
         while True:
@@ -377,6 +396,7 @@ class LazerTitleWatcher:
                 try:
                     reader, writer = await asyncio.open_unix_connection(sock)
                     win_class, win_title = await self.get_window_info()
+                    active_class = win_class
                     self._update_state(win_class, win_title)
                     try:
                         while True:
@@ -387,7 +407,12 @@ class LazerTitleWatcher:
                             if line_str.startswith("activewindow>>"):
                                 parts = line_str.split(">>", 1)[1].split(",", 1)
                                 if len(parts) == 2:
+                                    active_class = parts[0]
                                     self._update_state(parts[0], parts[1])
+                            elif line_str.startswith("windowtitlev2>>"):
+                                parts = line_str.split(">>", 1)[1].split(",", 1)
+                                if len(parts) == 2 and ("osu" in active_class.lower() or "osu" in parts[1].lower()):
+                                    self._update_state(active_class or "osu!", parts[1])
                     finally:
                         writer.close()
                     return
@@ -435,7 +460,7 @@ class TosuWatcher:
         self.last_update_time = time.time()
         
     def _set_state(self, tip_enabled):
-        if tip_enabled != (not self.is_playing):
+        if tip_enabled != (not self.is_playing) or self.tablet.tip_enabled != tip_enabled:
             self.is_playing = not tip_enabled
             self.tablet.set_tip_enabled(tip_enabled)
 

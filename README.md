@@ -6,7 +6,7 @@ Requires a Wacom tablet with [shavit's custom firmware](https://files.shav.it/os
 
 ## Features
 - **Zero dependencies** for basic functionality (uses standard library `fcntl` to send HID Feature Reports to `/dev/hidraw*`).
-- **osu! lazer support (Native & Flatpak)**: Perfect pause/fail detection natively via window titles. Supports **Hyprland** (`hyprctl`), **X11** (`xprop`), and **Sway** (`swaymsg`). Gracefully falls back when a compositor or environment is unavailable.
+- **osu! lazer support (Native & Flatpak)**: Instant pause, fail, resume, and results screen detection via `runtime.log` (`GameplayClockContainer` start/stop & screen stack events) combined with compositor window title events (`Hyprland`, `Sway`, `i3`, `KDE`, `GNOME`, `X11`).
 - **osu! stable support (Wine)**: Connects to `tosu` or `gosumemory` via websocket to detect pauses based on frozen audio time (exactly like the Windows version).
 - **Automated Setup**: Can automatically generate and install necessary `udev` permissions.
 
@@ -32,7 +32,7 @@ It runs in the foreground. Press `Ctrl+C` when done, and it will safely re-enabl
 
 ### Desktop Environment Support
 
-- **Hyprland**: Supported natively via Python `asyncio` Unix domain socket subscription to `.socket2.sock` (zero subprocess polling overhead; no external `socat` binary required) and `hyprctl`.
+- **Hyprland**: Supported natively via Python `asyncio` Unix domain socket subscription to `.socket2.sock` (`activewindow>>` and `windowtitlev2>>` events, zero subprocess polling overhead, no external `socat` binary required) and `hyprctl`.
 - **Sway / i3**: Supported natively via `swaymsg` / `i3-msg` event subscription.
 - **X11**: Supported via `xprop` (install using your package manager, e.g., `sudo pacman -S xorg-xprop`).
 - **KDE Plasma (Wayland)**: Supported via `kdotool`. Install via `sudo pacman -S kdotool`.
